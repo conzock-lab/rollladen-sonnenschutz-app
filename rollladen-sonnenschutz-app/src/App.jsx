@@ -319,6 +319,7 @@ function Badge({ children }) { return <span className="rounded-full bg-slate-100
 function Card({ children, className = "" }) { return <section className={`rounded-[2rem] bg-white p-4 shadow-sm md:p-6 ${className}`}>{children}</section>; }
 function SectionTitle({ icon: Icon, title, subtitle }) { return <div className="mb-5 flex items-start gap-3"><div className="rounded-2xl bg-slate-950 p-3 text-white"><Icon size={20} /></div><div><h2 className="text-xl font-black tracking-tight text-slate-950 md:text-2xl">{title}</h2><p className="mt-1 max-w-4xl text-sm leading-6 text-slate-600">{subtitle}</p></div></div>; }
 function Field({ label, value, onChange, placeholder = "", type = "text" }) { return <label className="block rounded-2xl bg-slate-50 p-4 text-sm font-bold text-slate-800">{label}<input type={type} value={value ?? ""} onChange={(e) => onChange?.(e.target.value)} placeholder={placeholder} className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm font-medium outline-none focus:border-slate-950" /></label>; }
+function LoginField({ label, value, onChange, placeholder = "", type = "text", autoComplete = "off" }) { return <label className="block rounded-2xl bg-slate-50 p-4 text-sm font-bold text-slate-800">{label}<input type={type} value={value ?? ""} onChange={(e) => onChange?.(e.target.value)} placeholder={placeholder} autoComplete={autoComplete} className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm font-medium outline-none placeholder:text-slate-400 placeholder:font-medium focus:border-slate-950" /></label>; }
 function TextArea({ label, value, onChange, placeholder = "" }) { return <label className="block rounded-2xl bg-slate-50 p-4 text-sm font-bold text-slate-800">{label}<textarea value={value ?? ""} onChange={(e) => onChange?.(e.target.value)} placeholder={placeholder} className="mt-2 h-28 w-full resize-none rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm font-medium outline-none focus:border-slate-950" /></label>; }
 function CopyBox({ title, text }) { const [copied, setCopied] = useState(false); const copy = async () => { try { await navigator.clipboard.writeText(text); setCopied(true); setTimeout(() => setCopied(false), 1200); } catch {} }; return <article className="rounded-3xl bg-slate-50 p-5"><h3 className="font-bold">{title}</h3><textarea readOnly value={text} className="mt-3 h-32 w-full resize-none rounded-2xl border border-slate-200 bg-white p-3 text-sm leading-6" /><button onClick={copy} className="mt-3 flex items-center gap-2 rounded-2xl bg-slate-950 px-4 py-3 text-sm font-bold text-white">{copied ? <Check size={16} /> : <Copy size={16} />}{copied ? "Kopiert" : "Text kopieren"}</button></article>; }
 function TopBar({ role, setRole, offline, setOffline, compact, currentUser, onLogout }) { const selected = roles.find((r) => r.id === role) || roles[0]; const canSwitchRole = currentUser?.role === "dev"; return <div className="sticky top-3 z-20 mb-4 rounded-[1.5rem] border border-slate-200 bg-white/90 p-3 shadow-sm backdrop-blur"><div className={compact ? "space-y-3" : "grid gap-3 md:grid-cols-[1fr_auto] md:items-center"}><div className={compact ? "space-y-2" : "flex flex-col gap-2 sm:flex-row sm:items-center"}><div className="flex items-center gap-2 rounded-2xl bg-slate-950 px-3 py-2 text-white"><UserRound size={18} /><span className="text-sm font-bold">{currentUser?.name || "Nutzer"}</span></div>{canSwitchRole ? <select value={role} onChange={(e) => setRole(e.target.value)} className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-bold outline-none sm:w-auto">{roles.map((r) => <option key={r.id} value={r.id}>{r.label}</option>)}</select> : <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-bold text-slate-700">{selected.label}</div>}{!compact && <p className="text-xs leading-5 text-slate-500">{selected.description}</p>}</div><div className="flex gap-2"><button onClick={() => setOffline(!offline)} className={`flex items-center justify-center gap-2 rounded-2xl px-4 py-3 text-sm font-bold ${offline ? "bg-emerald-100 text-emerald-800" : "bg-slate-100 text-slate-700"}`}>{offline ? <WifiOff size={18} /> : <Wifi size={18} />}{offline ? "Offline" : "Online"}</button><button onClick={onLogout} className="rounded-2xl bg-rose-100 px-4 py-3 text-sm font-bold text-rose-800">Abmelden</button></div></div></div>; }
@@ -333,66 +334,90 @@ function LoginGate({
   setCompanyAuthMode,
   registerCompanyWithSupabase,
   signInCompanyWithSupabase,
-  createCompanyForSignedInUser,
+  pendingRegistration,
+  resendConfirmationEmail,
+  finishEmailConfirmation,
+  clearPendingRegistration,
   codeLogin,
   setCodeLogin,
   loginWithPersonalCode,
   supabaseStatus,
   isSupabaseConfigured,
 }) {
+  const [loginType, setLoginType] = useState("company");
+
   return <main className={`min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-800 p-4 text-slate-950 ${device?.isMobile ? "pb-8" : "md:p-8"}`}>
-    <div className="mx-auto grid min-h-[calc(100vh-2rem)] max-w-6xl items-center gap-6 lg:grid-cols-[0.85fr_1.15fr]">
-      <section className="text-white">
-        <div className="inline-flex items-center gap-2 rounded-full bg-white/10 px-4 py-2 text-sm font-bold text-white/80">
+    <div className="mx-auto flex min-h-[calc(100vh-2rem)] max-w-3xl flex-col justify-center gap-6">
+      <section className="text-center text-white">
+        <div className="mx-auto inline-flex items-center gap-2 rounded-full bg-white/10 px-4 py-2 text-sm font-bold text-white/80">
           <ShieldCheck size={18} /> Geschützter Zugriff
         </div>
         <h1 className="mt-5 text-4xl font-black tracking-tight md:text-6xl">Rollladen & Sonnenschutz App</h1>
-        <p className="mt-5 max-w-xl text-base leading-8 text-white/75">
-          Erst anmelden, dann App nutzen. Firmen melden sich mit E-Mail und Passwort an. Monteure, Vorarbeiter, Azubis und Kunden nutzen Name + persönlichen Zugangscode.
+        <p className="mx-auto mt-5 max-w-2xl text-base leading-8 text-white/75">
+          Zentrale App für Betriebe, Monteure, Vorarbeiter, Azubis und Kunden. Erst anmelden, dann Aufträge, Team, Berichtsheft, Checklisten und Cloud-Synchronisation nutzen.
         </p>
-        <div className="mt-6 grid gap-3 sm:grid-cols-3">
-          <div className="rounded-3xl bg-white/10 p-4"><p className="text-2xl font-black">1</p><p className="mt-1 text-sm text-white/70">Firma erstellt Team</p></div>
-          <div className="rounded-3xl bg-white/10 p-4"><p className="text-2xl font-black">2</p><p className="mt-1 text-sm text-white/70">Codes verteilen</p></div>
-          <div className="rounded-3xl bg-white/10 p-4"><p className="text-2xl font-black">3</p><p className="mt-1 text-sm text-white/70">Cloud synchronisiert</p></div>
-        </div>
-        <div className="mt-6 rounded-3xl bg-emerald-400/10 p-4 text-sm font-bold leading-6 text-emerald-100">
-          {isSupabaseConfigured ? "Supabase ist verbunden. Login und automatische Cloud-Synchronisation sind aktiv." : "Supabase-Variablen fehlen noch. Bitte in Vercel VITE_SUPABASE_URL und VITE_SUPABASE_ANON_KEY setzen."}
+        <div className="mx-auto mt-6 grid max-w-xl gap-3 sm:grid-cols-3">
+          <div className="rounded-3xl bg-white/10 p-4"><p className="text-2xl font-black">1</p><p className="mt-1 text-sm text-white/70">Firma anlegen</p></div>
+          <div className="rounded-3xl bg-white/10 p-4"><p className="text-2xl font-black">2</p><p className="mt-1 text-sm text-white/70">Team verbinden</p></div>
+          <div className="rounded-3xl bg-white/10 p-4"><p className="text-2xl font-black">3</p><p className="mt-1 text-sm text-white/70">Daten synchronisieren</p></div>
         </div>
       </section>
 
-      <section className="space-y-4">
-        <Card>
-          <SectionTitle icon={Database} title="Firma anmelden" subtitle="Büro/Meister melden sich mit E-Mail an und verwalten danach Team, Kunden, Baustellen und Codes." />
-          {supabaseStatus && <div className="mb-4 rounded-2xl bg-slate-50 p-3 text-sm font-bold text-slate-700">{supabaseStatus}</div>}
-          <div className="grid grid-cols-2 gap-2 rounded-2xl bg-slate-100 p-1">
-            <button onClick={() => setCompanyAuthMode("register")} className={`rounded-xl px-3 py-2 text-sm font-black ${companyAuthMode === "register" ? "bg-white shadow" : "text-slate-500"}`}>Registrieren</button>
-            <button onClick={() => setCompanyAuthMode("login")} className={`rounded-xl px-3 py-2 text-sm font-black ${companyAuthMode === "login" ? "bg-white shadow" : "text-slate-500"}`}>Einloggen</button>
+      <Card>
+        {pendingRegistration ? (
+          <div>
+            <SectionTitle icon={CheckCircle2} title="E-Mail bestätigen" subtitle="Öffne den Bestätigungslink in deiner E-Mail. Danach kannst du hier direkt weiter zur App." />
+            <div className="rounded-2xl bg-emerald-50 p-4 text-sm font-bold leading-6 text-emerald-900">
+              Bestätigungsmail gesendet an: {pendingRegistration.email}
+            </div>
+            <div className="mt-4 grid gap-3 md:grid-cols-3">
+              <button onClick={finishEmailConfirmation} className="rounded-2xl bg-slate-950 px-4 py-3 text-sm font-black text-white">E-Mail bestätigt – weiter</button>
+              <button onClick={resendConfirmationEmail} className="rounded-2xl bg-emerald-100 px-4 py-3 text-sm font-bold text-emerald-800">Bestätigungsmail erneut senden</button>
+              <button onClick={clearPendingRegistration} className="rounded-2xl bg-slate-100 px-4 py-3 text-sm font-bold text-slate-700">Andere Daten verwenden</button>
+            </div>
+            <p className="mt-4 rounded-2xl bg-amber-50 p-3 text-xs font-bold leading-5 text-amber-900">Falls du mehrere E-Mails anforderst, nutze immer den neuesten Link.</p>
           </div>
-          <div className="mt-4 grid gap-3 md:grid-cols-2">
-            {companyAuthMode === "register" && <Field label="Name Meister/Büro" value={loginForm.name} onChange={(v) => setLoginForm({ ...loginForm, name: v })} placeholder="z. B. Max Mustermann" />}
-            {companyAuthMode === "register" && <Field label="Betrieb" value={loginForm.company} onChange={(v) => setLoginForm({ ...loginForm, company: v })} placeholder="z. B. Muster Sonnenschutz GmbH" />}
-            <Field label="E-Mail" value={loginForm.email} onChange={(v) => setLoginForm({ ...loginForm, email: v })} placeholder="z. B. max.mustermann@example.com" />
-            <Field label="Passwort" type="password" value={loginForm.password} onChange={(v) => setLoginForm({ ...loginForm, password: v })} />
-          </div>
-          <div className="mt-4 grid gap-3 md:grid-cols-2">
-            <button onClick={companyAuthMode === "register" ? registerCompanyWithSupabase : signInCompanyWithSupabase} className="rounded-2xl bg-slate-950 px-4 py-3 text-sm font-black text-white">
-              {companyAuthMode === "register" ? "Firma registrieren" : "Firma einloggen"}
-            </button>
-            <button onClick={createCompanyForSignedInUser} className="rounded-2xl bg-emerald-100 px-4 py-3 text-sm font-bold text-emerald-800">Firma für angemeldeten Account erstellen</button>
-          </div>
-        </Card>
+        ) : (
+          <div>
+            <SectionTitle icon={loginType === "company" ? Database : UserRound} title="Anmelden" subtitle="Firmen melden sich mit E-Mail an. Teammitglieder und Kunden nutzen Name + persönlichen Code." />
+            {supabaseStatus && <div className="mb-4 rounded-2xl bg-slate-50 p-3 text-sm font-bold text-slate-700">{supabaseStatus}</div>}
+            <div className="grid grid-cols-2 gap-2 rounded-2xl bg-slate-100 p-1">
+              <button onClick={() => setLoginType("company")} className={`rounded-xl px-3 py-3 text-sm font-black ${loginType === "company" ? "bg-white shadow" : "text-slate-500"}`}>Firma</button>
+              <button onClick={() => setLoginType("code")} className={`rounded-xl px-3 py-3 text-sm font-black ${loginType === "code" ? "bg-white shadow" : "text-slate-500"}`}>Name + Code</button>
+            </div>
 
-        <Card>
-          <SectionTitle icon={UserRound} title="Name + Code" subtitle="Monteur, Vorarbeiter, Azubi oder Kunde meldet sich ohne E-Mail mit persönlichem Zugangscode an." />
-          <div className="grid gap-3 md:grid-cols-2">
-            <Field label="Name" value={codeLogin.name} onChange={(v) => setCodeLogin({ ...codeLogin, name: v })} />
-            <Field label="Persönlicher Code" value={codeLogin.code} onChange={(v) => setCodeLogin({ ...codeLogin, code: v.toUpperCase() })} placeholder="z. B. MON-48291" />
+            {loginType === "company" ? (
+              <div className="mt-5">
+                <div className="grid grid-cols-2 gap-2 rounded-2xl bg-slate-100 p-1">
+                  <button onClick={() => setCompanyAuthMode("register")} className={`rounded-xl px-3 py-2 text-sm font-black ${companyAuthMode === "register" ? "bg-white shadow" : "text-slate-500"}`}>Registrieren</button>
+                  <button onClick={() => setCompanyAuthMode("login")} className={`rounded-xl px-3 py-2 text-sm font-black ${companyAuthMode === "login" ? "bg-white shadow" : "text-slate-500"}`}>Einloggen</button>
+                </div>
+                <div className="mt-4 grid gap-3 md:grid-cols-2">
+                  {companyAuthMode === "register" && <LoginField label="Name Meister/Büro" value={loginForm.name} onChange={(v) => setLoginForm({ ...loginForm, name: v })} placeholder="z. B. Max Mustermann" autoComplete="off" />}
+                  {companyAuthMode === "register" && <LoginField label="Betrieb" value={loginForm.company} onChange={(v) => setLoginForm({ ...loginForm, company: v })} placeholder="z. B. Muster Sonnenschutz GmbH" autoComplete="organization" />}
+                  <LoginField label="E-Mail" value={loginForm.email} onChange={(v) => setLoginForm({ ...loginForm, email: v })} placeholder="z. B. max.mustermann@example.com" type="email" autoComplete="email" />
+                  <LoginField label="Passwort" type="password" value={loginForm.password} onChange={(v) => setLoginForm({ ...loginForm, password: v })} placeholder="Passwort eingeben" autoComplete={companyAuthMode === "register" ? "new-password" : "current-password"} />
+                </div>
+                <button onClick={companyAuthMode === "register" ? registerCompanyWithSupabase : signInCompanyWithSupabase} className="mt-4 w-full rounded-2xl bg-slate-950 px-4 py-3 text-sm font-black text-white">
+                  {companyAuthMode === "register" ? "Firma registrieren" : "Firma einloggen"}
+                </button>
+              </div>
+            ) : (
+              <div className="mt-5">
+                <div className="grid gap-3 md:grid-cols-2">
+                  <LoginField label="Name" value={codeLogin.name} onChange={(v) => setCodeLogin({ ...codeLogin, name: v })} placeholder="z. B. Max Mustermann" autoComplete="off" />
+                  <LoginField label="Persönlicher Code" value={codeLogin.code} onChange={(v) => setCodeLogin({ ...codeLogin, code: v.toUpperCase() })} placeholder="z. B. MON-48291" autoComplete="off" />
+                </div>
+                <button onClick={loginWithPersonalCode} className="mt-4 w-full rounded-2xl bg-slate-950 px-4 py-3 text-sm font-black text-white">Mit Name + Code anmelden</button>
+              </div>
+            )}
           </div>
-          <button onClick={loginWithPersonalCode} className="mt-4 w-full rounded-2xl bg-slate-950 px-4 py-3 text-sm font-black text-white">Mit Name + Code anmelden</button>
-          <p className="mt-4 rounded-2xl bg-amber-50 p-3 text-xs font-bold leading-5 text-amber-900">Für Code-Logins muss in Supabase „Anonymous Sign-ins“ aktiv sein.</p>
-        </Card>
+        )}
+      </Card>
 
-              </section>
+      <p className="text-center text-xs font-bold text-white/45">
+        {isSupabaseConfigured ? "Cloud-Verbindung aktiv." : "Cloud-Verbindung noch nicht eingerichtet."}
+      </p>
     </div>
   </main>;
 }
@@ -436,7 +461,7 @@ export default function App() {
   const [reportReminder, setReportReminder] = useState("Freitag 16:00");
   const [reportExportText, setReportExportText] = useState("");
   const [backupText, setBackupText] = useState("");
-  const [loginForm, setLoginForm] = useState({ name: "Max Mustermann", email: "max.mustermann@example.com", password: "", company: "Muster Sonnenschutz GmbH", role: "meister" });
+  const [loginForm, setLoginForm] = useState({ name: "", email: "", password: "", company: "", role: "meister" });
   const [cloudCompanyId, setCloudCompanyId] = useState(() => loadJson("rs-cloud-company", "betrieb-muster"));
   const [techStack, setTechStack] = useState("supabase");
   const [favorite, setFavorite] = useState("");
@@ -449,6 +474,7 @@ export default function App() {
   const [teamSearch, setTeamSearch] = useState("");
   const [supabaseStatus, setSupabaseStatus] = useState("");
   const [companyAuthMode, setCompanyAuthMode] = useState("register");
+  const [pendingRegistration, setPendingRegistration] = useState(() => loadJson("rs-pending-registration", null));
   const [initialCloudLoaded, setInitialCloudLoaded] = useState(false);
   const [autoSyncEnabled, setAutoSyncEnabled] = useState(true);
   const [autoSyncStatus, setAutoSyncStatus] = useState("Wartet auf Login");
@@ -470,6 +496,7 @@ export default function App() {
   useEffect(() => saveJson("rs-cloud-company", cloudCompanyId), [cloudCompanyId]);
   useEffect(() => saveJson("rs-company", company), [company]);
   useEffect(() => saveJson("rs-company-people", companyPeople), [companyPeople]);
+  useEffect(() => saveJson("rs-pending-registration", pendingRegistration), [pendingRegistration]);
 
   const currentPerson = authUser?.personId ? companyPeople.find((p) => p.id === authUser.personId) : null;
   const isCompanyAdmin = ["dev", "meister", "buero"].includes(role);
@@ -647,22 +674,25 @@ export default function App() {
       setBackendMessage(`Supabase Loginfehler: ${error.message}`);
     }
   };
-  const createCompanyForSignedInUser = async () => {
+  const createCompanyForSignedInUser = async (registration = pendingRegistration || loginForm) => {
     if (!requireSupabase()) return;
     try {
       const { data: authData, error: authError } = await supabase.auth.getUser();
       if (authError) throw authError;
-      if (!authData?.user) throw new Error("Bitte zuerst mit E-Mail einloggen.");
+      if (!authData?.user) throw new Error("Bitte zuerst die E-Mail bestätigen oder einloggen.");
       const companyId = cloudCompanyId && cloudCompanyId !== "betrieb-muster" ? cloudCompanyId : `betrieb-${authData.user.id.slice(0, 8)}`;
-      const { data: rpcCompany, error: rpcError } = await supabase.rpc("create_company_for_current_user", { p_company_id: companyId, p_company_name: loginForm.company, p_admin_name: loginForm.name || loginForm.email });
+      const adminName = registration?.name || loginForm.name || authData.user.email || "Firma Admin";
+      const companyName = registration?.company || loginForm.company || "Mein Betrieb";
+      const { data: rpcCompany, error: rpcError } = await supabase.rpc("create_company_for_current_user", { p_company_id: companyId, p_company_name: companyName, p_admin_name: adminName });
       if (rpcError) throw rpcError;
       const nextCompany = rowToCompany(Array.isArray(rpcCompany) ? rpcCompany[0] : rpcCompany);
       setCompany(nextCompany);
       setCloudCompanyId(nextCompany.id);
-      setAuthUser({ id: authData.user.id, name: loginForm.name, email: authData.user.email || loginForm.email, role: "meister", company: nextCompany.name, companyId: nextCompany.id, loginType: "email", loggedInAt: new Date().toLocaleString("de-DE") });
+      setPendingRegistration(null);
+      setAuthUser({ id: authData.user.id, name: adminName, email: authData.user.email || registration?.email || loginForm.email, role: "meister", company: nextCompany.name, companyId: nextCompany.id, loginType: "email", loggedInAt: new Date().toLocaleString("de-DE") });
       setRole("meister");
       await saveAppToSupabase(nextCompany);
-      setBackendMessage("Firma wurde für den angemeldeten Supabase-Nutzer erstellt.");
+      setBackendMessage("E-Mail bestätigt. Firma wurde erstellt und Cloud-Sync ist aktiv.");
     } catch (error) {
       setBackendMessage(`Firma konnte nicht erstellt werden: ${error.message}`);
     }
@@ -670,22 +700,67 @@ export default function App() {
   const registerCompanyWithSupabase = async () => {
     if (!requireSupabase()) return;
     try {
+      const registration = { name: loginForm.name.trim(), email: loginForm.email.trim(), company: loginForm.company.trim(), createdAt: new Date().toISOString() };
       const { error: signUpError } = await supabase.auth.signUp({
-        email: loginForm.email,
+        email: registration.email,
         password: loginForm.password,
-        options: { data: { name: loginForm.name, role: "meister", company: loginForm.company } },
+        options: {
+          data: { name: registration.name, role: "meister", company: registration.company },
+          emailRedirectTo: window.location.origin,
+        },
       });
       if (signUpError) throw signUpError;
+      setPendingRegistration(registration);
       const { data: authData } = await supabase.auth.getUser();
       if (!authData?.user) {
-        setBackendMessage("Registrierung erstellt. Bitte E-Mail bestätigen, danach einloggen und 'Firma für Account erstellen' klicken.");
+        setBackendMessage("Registrierung erstellt. Bitte bestätige deine E-Mail. Danach hier auf 'E-Mail bestätigt – weiter' klicken.");
         return;
       }
-      await createCompanyForSignedInUser();
+      await createCompanyForSignedInUser(registration);
     } catch (error) {
       setBackendMessage(`Registrierung fehlgeschlagen: ${error.message}`);
     }
   };
+  const resendConfirmationEmail = async () => {
+    if (!requireSupabase()) return;
+    const email = pendingRegistration?.email || loginForm.email.trim();
+    if (!email) {
+      setBackendMessage("Bitte zuerst eine E-Mail-Adresse eintragen.");
+      return;
+    }
+    try {
+      const { error } = await supabase.auth.resend({
+        type: "signup",
+        email,
+        options: { emailRedirectTo: window.location.origin },
+      });
+      if (error) throw error;
+      setBackendMessage(`Bestätigungsmail wurde erneut an ${email} gesendet.`);
+    } catch (error) {
+      setBackendMessage(`Bestätigungsmail konnte nicht erneut gesendet werden: ${error.message}`);
+    }
+  };
+
+  const finishEmailConfirmation = async () => {
+    if (!requireSupabase()) return;
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const user = sessionData?.session?.user;
+      if (!user) {
+        setBackendMessage("Noch keine bestätigte Sitzung gefunden. Öffne den neuesten Bestätigungslink aus deiner E-Mail und klicke danach erneut auf 'E-Mail bestätigt – weiter'.");
+        return;
+      }
+      await createCompanyForSignedInUser(pendingRegistration || loginForm);
+    } catch (error) {
+      setBackendMessage(`Bestätigung konnte nicht abgeschlossen werden: ${error.message}`);
+    }
+  };
+
+  const clearPendingRegistration = () => {
+    setPendingRegistration(null);
+    setBackendMessage("Du kannst jetzt neue Anmeldedaten eintragen.");
+  };
+
   const signInCompanyWithSupabase = async () => {
     if (!requireSupabase()) return;
     try {
@@ -838,10 +913,18 @@ export default function App() {
   useEffect(() => {
     if (!isSupabaseConfigured || !supabase) return;
     let mounted = true;
-    supabase.auth.getUser().then(({ data }) => {
-      if (mounted && data?.user && !authUser) loadCurrentCompanyFromSupabase();
-    });
+    const continueAfterEmailConfirm = async () => {
+      const { data } = await supabase.auth.getUser();
+      if (!mounted || !data?.user || authUser) return;
+      if (pendingRegistration) await createCompanyForSignedInUser(pendingRegistration);
+      else await loadCurrentCompanyFromSupabase();
+    };
+    continueAfterEmailConfirm();
     const { data: listener } = supabase.auth.onAuthStateChange((event, session) => {
+      if (session?.user && !authUser) {
+        if (pendingRegistration) createCompanyForSignedInUser(pendingRegistration);
+        else loadCurrentCompanyFromSupabase();
+      }
       if (!session && authUser?.loginType?.includes("supabase")) setAuthUser(null);
     });
     return () => {
@@ -892,6 +975,10 @@ export default function App() {
       registerCompanyWithSupabase={registerCompanyWithSupabase}
       signInCompanyWithSupabase={signInCompanyWithSupabase}
       createCompanyForSignedInUser={createCompanyForSignedInUser}
+      pendingRegistration={pendingRegistration}
+      resendConfirmationEmail={resendConfirmationEmail}
+      finishEmailConfirmation={finishEmailConfirmation}
+      clearPendingRegistration={clearPendingRegistration}
       codeLogin={codeLogin}
       setCodeLogin={setCodeLogin}
       loginWithPersonalCode={loginWithPersonalCode}
@@ -928,7 +1015,7 @@ export default function App() {
   {active === "offline" && screen(<Card><SectionTitle icon={WifiOff} title="Offline-Modus" subtitle="Status wird lokal gespeichert. Später: Aufträge, Fotos, Checklisten und Protokolle synchronisieren." /><button onClick={() => setOffline(!offline)} className={`rounded-2xl px-5 py-3 text-sm font-black ${offline ? "bg-emerald-100 text-emerald-800" : "bg-slate-950 text-white"}`}>{offline ? "Offline aktiv" : "Offline aktivieren"}</button><div className="mt-5 grid gap-3 md:grid-cols-3">{["Aufträge offline", "Fotos zwischenspeichern", "Checklisten abhaken", "Protokolle schreiben", "später synchronisieren", "Konflikte anzeigen"].map((i) => <div key={i} className="rounded-2xl bg-slate-50 p-4 text-sm font-bold">{i}</div>)}</div></Card>)}
   {active === "rights" && screen(<Card><SectionTitle icon={Settings} title="Rechte-System" subtitle="Welche Rolle darf was? Dev sieht alles." /><div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{roles.map((r) => <article key={r.id} className="rounded-3xl bg-slate-50 p-5"><h3 className="font-black">{r.label}</h3><p className="mt-2 text-sm text-slate-600">{r.description}</p><div className="mt-3 flex flex-wrap gap-2">{(r.id === "dev" ? navItems : navItems.filter((n) => n.roles.includes(r.id))).map((n) => <Badge key={n.id}>{n.label}</Badge>)}</div></article>)}</div></Card>)}
 
-  {active === "company" && screen(<div className="space-y-5"><div className="grid gap-5 lg:grid-cols-[0.9fr_1.1fr]"><Card><SectionTitle icon={UserRound} title="Firma & Team" subtitle="Firma legt Vorarbeiter, Monteure, Azubis und Kunden an. Jede Person bekommt einen persönlichen Zugangscode für die Anmeldung vor der App." /><div className="rounded-3xl bg-slate-50 p-4"><p className="text-xs font-bold uppercase text-slate-500">Betrieb</p><Field label="Firmenname" value={company.name} onChange={(v) => setCompany({ ...company, name: v })} /><p className="mt-3 rounded-2xl bg-white p-3 text-sm font-bold leading-6 text-slate-600">Allgemeine Firmen-Codes wurden entfernt. Die Firma erstellt Personen direkt im Verzeichnis; jede Person erhält ihren eigenen Zugangscode.</p></div><div className="mt-5 rounded-3xl bg-white p-0"><h3 className="mb-3 font-black">Person erstellen</h3><div className="grid gap-3 md:grid-cols-2"><Field label="Name" value={personForm.name} onChange={(v) => setPersonForm({ ...personForm, name: v })} placeholder="z. B. Max Mustermann" /><label className="block rounded-2xl bg-slate-50 p-4 text-sm font-bold">Rolle<select value={personForm.role} onChange={(e) => setPersonForm({ ...personForm, role: e.target.value })} className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-3">{teamRoleOptions.map((r) => <option key={r.id} value={r.id}>{r.label}</option>)}</select></label><Field label="Telefon" value={personForm.phone} onChange={(v) => setPersonForm({ ...personForm, phone: v })} placeholder="optional" /><Field label={personForm.role === "kunde" ? "Adresse" : "Adresse / Bereich"} value={personForm.address} onChange={(v) => setPersonForm({ ...personForm, address: v })} placeholder={personForm.role === "kunde" ? "z. B. Musterstraße 1" : "optional"} />{personForm.role !== "kunde" && <Field label="Kolonne / Team" value={personForm.team} onChange={(v) => setPersonForm({ ...personForm, team: v })} placeholder="z. B. Kolonne 1" />}{personForm.role === "azubi" && <label className="block rounded-2xl bg-slate-50 p-4 text-sm font-bold">Ausbildungsjahr<select value={personForm.trainingYear} onChange={(e) => setPersonForm({ ...personForm, trainingYear: e.target.value })} className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-3"><option value="1">1. Ausbildungsjahr</option><option value="2">2. Ausbildungsjahr</option><option value="3">3. Ausbildungsjahr</option></select></label>}</div><button onClick={createCompanyPerson} className="mt-4 w-full rounded-2xl bg-slate-950 px-4 py-3 text-sm font-black text-white">Person anlegen & persönlichen Code erzeugen</button></div></Card><Card><SectionTitle icon={ClipboardList} title="Team-Übersicht" subtitle="Schneller Überblick über aktive Personen in der Firma." /><div className="grid gap-3 md:grid-cols-2"><div className="rounded-3xl bg-slate-50 p-4"><p className="text-3xl font-black">{teamMembers.length}</p><p className="text-sm text-slate-600">Teammitglieder</p></div><div className="rounded-3xl bg-slate-50 p-4"><p className="text-3xl font-black">{companyCustomers.length}</p><p className="text-sm text-slate-600">Kunden</p></div></div><div className="mt-4 rounded-3xl bg-emerald-50 p-4 text-sm font-bold leading-6 text-emerald-900">Code-Anmeldung findet nur auf der Login-Seite statt. In der App werden Personen verwaltet und Baustellen zugewiesen.</div></Card></div><Card><SectionTitle icon={Search} title="Verzeichnis" subtitle="Firma sieht alle Vorarbeiter, Monteure, Azubis und Kunden inklusive persönlichem Code, Status, Lernfortschritt und Baustellen." /><div className="mb-4 flex items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3"><Search size={18} /><input value={teamSearch} onChange={(e) => setTeamSearch(e.target.value)} placeholder="Suchen: Name, Code, Rolle, Status ..." className="w-full outline-none" /></div><div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{filteredCompanyPeople.map((p) => { const assignedCount = orders.filter((o) => (o.assignedMemberIds || []).includes(p.id) || o.customerPersonId === p.id).length; return <article key={p.id} className="rounded-3xl bg-slate-50 p-5"><div className="flex items-start justify-between gap-3"><div><h3 className="font-black">{p.name}</h3><p className="mt-1 text-sm text-slate-600">{personRoleLabel(p.role)} · {p.role === "kunde" ? (p.address || "ohne Adresse") : (p.team || p.address || "ohne Bereich")}</p></div><Badge>{p.status}</Badge></div><div className="mt-3"><CopyBox title="Persönlicher Zugangscode" text={p.accessCode} /></div>{p.role === "azubi" && <div className="mt-3 rounded-2xl bg-white p-3"><p className="text-xs font-bold uppercase text-slate-500">Lernfortschritt</p><input type="range" min="0" max="100" value={p.progress || 0} onChange={(e) => updateAzubiProgress(p.id, e.target.value)} className="mt-2 w-full" /><p className="text-sm font-black">{p.progress || 0}% · {p.trainingYear || "?"}. Ausbildungsjahr</p></div>}<div className="mt-3 grid grid-cols-2 gap-2"><button onClick={() => setPersonStatus(p.id, p.status === "aktiv" ? "inaktiv" : "aktiv")} className="rounded-2xl bg-slate-950 px-3 py-2 text-xs font-bold text-white">{p.status === "aktiv" ? "Deaktivieren" : "Aktivieren"}</button><button onClick={() => regeneratePersonCode(p.id)} className="rounded-2xl bg-slate-100 px-3 py-2 text-xs font-bold">Code neu</button><button onClick={() => deletePerson(p.id)} className="rounded-2xl bg-rose-100 px-3 py-2 text-xs font-bold text-rose-800">Löschen</button><div className="rounded-2xl bg-white px-3 py-2 text-xs font-bold text-slate-600">{assignedCount} Baustellen</div></div></article>; })}</div></Card></div>)}
+  {active === "company" && screen(<div className="space-y-5"><div className="grid gap-5 lg:grid-cols-[0.9fr_1.1fr]"><Card><SectionTitle icon={UserRound} title="Firma & Team" subtitle="Firma legt Vorarbeiter, Monteure, Azubis und Kunden an. Jede Person bekommt einen persönlichen Zugangscode für die Anmeldung vor der App." /><div className="rounded-3xl bg-slate-50 p-4"><p className="text-xs font-bold uppercase text-slate-500">Betrieb</p><Field label="Firmenname" value={company.name} onChange={(v) => setCompany({ ...company, name: v })} /><p className="mt-3 rounded-2xl bg-white p-3 text-sm font-bold leading-6 text-slate-600">Allgemeine Firmen-Codes wurden entfernt. Die Firma erstellt Personen direkt im Verzeichnis; jede Person erhält ihren eigenen Zugangscode.</p></div><div className="mt-5 rounded-3xl bg-white p-0"><h3 className="mb-3 font-black">Person erstellen</h3><div className="grid gap-3 md:grid-cols-2"><Field label="Name" value={personForm.name} onChange={(v) => setPersonForm({ ...personForm, name: v })} placeholder="z. B. Max Mustermann" /><label className="block rounded-2xl bg-slate-50 p-4 text-sm font-bold">Rolle<select value={personForm.role} onChange={(e) => setPersonForm({ ...personForm, role: e.target.value })} className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-3">{teamRoleOptions.map((r) => <option key={r.id} value={r.id}>{r.label}</option>)}</select></label><Field label="Telefon" value={personForm.phone} onChange={(v) => setPersonForm({ ...personForm, phone: v })} placeholder="optional" /><Field label={personForm.role === "kunde" ? "Adresse" : "Adresse / Bereich"} value={personForm.address} onChange={(v) => setPersonForm({ ...personForm, address: v })} placeholder={personForm.role === "kunde" ? "z. B. Musterstraße 1" : "optional"} />{personForm.role !== "kunde" && <Field label="Kolonne / Team" value={personForm.team} onChange={(v) => setPersonForm({ ...personForm, team: v })} placeholder="z. B. Kolonne 1" />}{personForm.role === "azubi" && <label className="block rounded-2xl bg-slate-50 p-4 text-sm font-bold">Ausbildungsjahr<select value={personForm.trainingYear} onChange={(e) => setPersonForm({ ...personForm, trainingYear: e.target.value })} className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-3"><option value="1">1. Ausbildungsjahr</option><option value="2">2. Ausbildungsjahr</option><option value="3">3. Ausbildungsjahr</option></select></label>}</div><button onClick={createCompanyPerson} className="mt-4 w-full rounded-2xl bg-slate-950 px-4 py-3 text-sm font-black text-white">Person anlegen & persönlichen Code erzeugen</button></div></Card><Card><SectionTitle icon={ClipboardList} title="Team-Übersicht" subtitle="Schneller Überblick über aktive Personen in der Firma." /><div className="grid gap-3 md:grid-cols-2"><div className="rounded-3xl bg-slate-50 p-4"><p className="text-3xl font-black">{teamMembers.length}</p><p className="text-sm text-slate-600">Teammitglieder</p></div><div className="rounded-3xl bg-slate-50 p-4"><p className="text-3xl font-black">{companyCustomers.length}</p><p className="text-sm text-slate-600">Kunden</p></div></div><div className="mt-4 rounded-3xl bg-emerald-50 p-4 text-sm font-bold leading-6 text-emerald-900">Personen, Kunden und Baustellen können hier übersichtlich verwaltet werden.</div></Card></div><Card><SectionTitle icon={Search} title="Verzeichnis" subtitle="Firma sieht alle Vorarbeiter, Monteure, Azubis und Kunden inklusive persönlichem Code, Status, Lernfortschritt und Baustellen." /><div className="mb-4 flex items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3"><Search size={18} /><input value={teamSearch} onChange={(e) => setTeamSearch(e.target.value)} placeholder="Suchen: Name, Code, Rolle, Status ..." className="w-full outline-none" /></div><div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{filteredCompanyPeople.map((p) => { const assignedCount = orders.filter((o) => (o.assignedMemberIds || []).includes(p.id) || o.customerPersonId === p.id).length; return <article key={p.id} className="rounded-3xl bg-slate-50 p-5"><div className="flex items-start justify-between gap-3"><div><h3 className="font-black">{p.name}</h3><p className="mt-1 text-sm text-slate-600">{personRoleLabel(p.role)} · {p.role === "kunde" ? (p.address || "ohne Adresse") : (p.team || p.address || "ohne Bereich")}</p></div><Badge>{p.status}</Badge></div><div className="mt-3"><CopyBox title="Persönlicher Zugangscode" text={p.accessCode} /></div>{p.role === "azubi" && <div className="mt-3 rounded-2xl bg-white p-3"><p className="text-xs font-bold uppercase text-slate-500">Lernfortschritt</p><input type="range" min="0" max="100" value={p.progress || 0} onChange={(e) => updateAzubiProgress(p.id, e.target.value)} className="mt-2 w-full" /><p className="text-sm font-black">{p.progress || 0}% · {p.trainingYear || "?"}. Ausbildungsjahr</p></div>}<div className="mt-3 grid grid-cols-2 gap-2"><button onClick={() => setPersonStatus(p.id, p.status === "aktiv" ? "inaktiv" : "aktiv")} className="rounded-2xl bg-slate-950 px-3 py-2 text-xs font-bold text-white">{p.status === "aktiv" ? "Deaktivieren" : "Aktivieren"}</button><button onClick={() => regeneratePersonCode(p.id)} className="rounded-2xl bg-slate-100 px-3 py-2 text-xs font-bold">Code neu</button><button onClick={() => deletePerson(p.id)} className="rounded-2xl bg-rose-100 px-3 py-2 text-xs font-bold text-rose-800">Löschen</button><div className="rounded-2xl bg-white px-3 py-2 text-xs font-bold text-slate-600">{assignedCount} Baustellen</div></div></article>; })}</div></Card></div>)}
   {active === "planning" && screen(<div className="grid gap-5 lg:grid-cols-[0.9fr_1.1fr]"><Card><SectionTitle icon={BriefcaseBusiness} title="Baustellenplanung" subtitle="Aufträge werden Vorarbeitern, Monteuren, Azubis und Kunden zugewiesen. Danach sehen Code-Logins nur ihre passenden Baustellen." /><div className="space-y-3">{orders.map((o) => <button key={o.id} onClick={() => setSelectedOrderId(o.id)} className={`w-full rounded-3xl border p-4 text-left ${selectedOrder?.id === o.id ? "border-slate-950 bg-white shadow-md" : "border-slate-100 bg-slate-50"}`}><div className="flex items-center justify-between"><strong>{o.date} {o.time} · {o.customer}</strong><Badge>{o.status}</Badge></div><p className="mt-1 text-sm text-slate-600">{o.address}</p><p className="mt-2 text-xs font-bold text-slate-500">Team: {(o.assignedMemberIds || []).map((id) => companyPeople.find((p) => p.id === id)?.name).filter(Boolean).join(", ") || o.assignedTo || "noch niemand"}</p></button>)}</div></Card><Card><SectionTitle icon={UserRound} title="Zuweisung für aktiven Auftrag" subtitle="Wähle Teammitglieder und Kunden aus dem Firmenverzeichnis." /><div className="mb-4 rounded-3xl bg-slate-50 p-4"><h3 className="font-black">{selectedOrder?.id} · {selectedOrder?.customer}</h3><p className="mt-1 text-sm text-slate-600">{selectedProduct.name} · {selectedOrder?.date} {selectedOrder?.time}</p></div><p className="mb-2 text-xs font-bold uppercase text-slate-500">Team zuweisen</p><div className="space-y-2">{teamMembers.map((p) => <label key={p.id} className="flex items-center justify-between gap-3 rounded-2xl bg-slate-50 p-3 text-sm font-bold"><span>{p.name} · {personRoleLabel(p.role)}</span><input type="checkbox" checked={(selectedOrder?.assignedMemberIds || []).includes(p.id)} onChange={() => toggleAssignment(p.id)} className="h-5 w-5 accent-slate-950" /></label>)}</div><p className="mb-2 mt-5 text-xs font-bold uppercase text-slate-500">Kunde zuweisen</p><div className="space-y-2">{companyCustomers.map((p) => <button key={p.id} onClick={() => assignCustomerToOrder(p.id)} className={`w-full rounded-2xl p-3 text-left text-sm font-bold ${selectedOrder?.customerPersonId === p.id ? "bg-slate-950 text-white" : "bg-slate-50"}`}>{p.name} · {p.status} · {p.address || "ohne Adresse"}</button>)}</div></Card></div>)}
 
   {active === "data" && screen(<div className="space-y-5">
