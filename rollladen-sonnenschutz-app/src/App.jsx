@@ -366,7 +366,7 @@ function LoginGate({
       <Card>
         {pendingRegistration ? (
           <div>
-            <SectionTitle icon={CheckCircle2} title="E-Mail bestätigen" subtitle="Öffne den Bestätigungslink in deiner E-Mail. Danach kannst du hier direkt weiter zur App." />
+            <SectionTitle icon={CheckCircle2} title="E-Mail bestätigen" subtitle="Öffne den Bestätigungslink in deiner E-Mail. Du musst deine Firmendaten danach nicht nochmal eintragen." />
             <div className="rounded-2xl bg-emerald-50 p-4 text-sm font-bold leading-6 text-emerald-900">
               Bestätigungsmail gesendet an: {pendingRegistration.email}
             </div>
@@ -375,7 +375,7 @@ function LoginGate({
               <button onClick={resendConfirmationEmail} className="rounded-2xl bg-emerald-100 px-4 py-3 text-sm font-bold text-emerald-800">Bestätigungsmail erneut senden</button>
               <button onClick={clearPendingRegistration} className="rounded-2xl bg-slate-100 px-4 py-3 text-sm font-bold text-slate-700">Andere Daten verwenden</button>
             </div>
-            <p className="mt-4 rounded-2xl bg-amber-50 p-3 text-xs font-bold leading-5 text-amber-900">Falls du mehrere E-Mails anforderst, nutze immer den neuesten Link.</p>
+            <p className="mt-4 rounded-2xl bg-amber-50 p-3 text-xs font-bold leading-5 text-amber-900">Falls du mehrere E-Mails anforderst, nutze immer den neuesten Link. Wenn Supabase nach dem Klick keine Sitzung öffnet, reicht danach E-Mail + Passwort; Name und Betrieb werden automatisch übernommen.</p>
           </div>
         ) : (
           <div>
@@ -661,7 +661,15 @@ export default function App() {
       if (!authData?.user) throw new Error("Kein Supabase-Nutzer angemeldet.");
       const { data: membership, error: membershipError } = await supabase.from("company_people").select("*, companies(*)").eq("auth_user_id", authData.user.id).limit(1).maybeSingle();
       if (membershipError) throw membershipError;
-      if (!membership) throw new Error("Für diesen Nutzer wurde noch keine Firma gefunden.");
+      if (!membership) {
+        const meta = authData.user.user_metadata || {};
+        await createCompanyForSignedInUser({
+          name: meta.name || pendingRegistration?.name || "Max Mustermann",
+          email: authData.user.email || pendingRegistration?.email || loginForm.email,
+          company: meta.company || pendingRegistration?.company || "Muster Sonnenschutz GmbH",
+        });
+        return;
+      }
       const nextCompany = rowToCompany(membership.companies);
       setCompany(nextCompany);
       setCloudCompanyId(nextCompany.id);
@@ -680,9 +688,10 @@ export default function App() {
       const { data: authData, error: authError } = await supabase.auth.getUser();
       if (authError) throw authError;
       if (!authData?.user) throw new Error("Bitte zuerst die E-Mail bestätigen oder einloggen.");
+      const meta = authData.user.user_metadata || {};
       const companyId = cloudCompanyId && cloudCompanyId !== "betrieb-muster" ? cloudCompanyId : `betrieb-${authData.user.id.slice(0, 8)}`;
-      const adminName = registration?.name || loginForm.name || authData.user.email || "Firma Admin";
-      const companyName = registration?.company || loginForm.company || "Mein Betrieb";
+      const adminName = registration?.name || meta.name || loginForm.name || authData.user.email || "Max Mustermann";
+      const companyName = registration?.company || meta.company || loginForm.company || "Muster Sonnenschutz GmbH";
       const { data: rpcCompany, error: rpcError } = await supabase.rpc("create_company_for_current_user", { p_company_id: companyId, p_company_name: companyName, p_admin_name: adminName });
       if (rpcError) throw rpcError;
       const nextCompany = rowToCompany(Array.isArray(rpcCompany) ? rpcCompany[0] : rpcCompany);
@@ -701,6 +710,10 @@ export default function App() {
     if (!requireSupabase()) return;
     try {
       const registration = { name: loginForm.name.trim(), email: loginForm.email.trim(), company: loginForm.company.trim(), createdAt: new Date().toISOString() };
+      if (!registration.name || !registration.email || !registration.company || !loginForm.password) {
+        setBackendMessage("Bitte Name, Betrieb, E-Mail und Passwort eintragen.");
+        return;
+      }
       const { error: signUpError } = await supabase.auth.signUp({
         email: registration.email,
         password: loginForm.password,
@@ -747,10 +760,12 @@ export default function App() {
       const { data: sessionData } = await supabase.auth.getSession();
       const user = sessionData?.session?.user;
       if (!user) {
-        setBackendMessage("Noch keine bestätigte Sitzung gefunden. Öffne den neuesten Bestätigungslink aus deiner E-Mail und klicke danach erneut auf 'E-Mail bestätigt – weiter'.");
+        setCompanyAuthMode("login");
+        setLoginForm((current) => ({ ...current, email: pendingRegistration?.email || current.email, name: pendingRegistration?.name || current.name, company: pendingRegistration?.company || current.company }));
+        setBackendMessage("Die E-Mail ist wahrscheinlich bestätigt, aber Supabase hat keine Sitzung im Browser geöffnet. Melde dich jetzt nur mit E-Mail und Passwort ein; die Firmendaten werden danach automatisch übernommen.");
         return;
       }
-      await createCompanyForSignedInUser(pendingRegistration || loginForm);
+      await createCompanyForSignedInUser(pendingRegistration || { name: user.user_metadata?.name, company: user.user_metadata?.company, email: user.email });
     } catch (error) {
       setBackendMessage(`Bestätigung konnte nicht abgeschlossen werden: ${error.message}`);
     }
