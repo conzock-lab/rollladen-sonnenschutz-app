@@ -115,7 +115,6 @@ const navItems = [
   { id: "pdf", label: "PDF Export", icon: Download, roles: ["vorarbeiter", "monteur", "meister", "buero", "kunde"] },
   { id: "offline", label: "Offline", icon: WifiOff, roles: ["azubi", "vorarbeiter", "monteur", "meister", "buero"] },
   { id: "rights", label: "Rechte", icon: Settings, roles: ["meister", "buero"] },
-  { id: "data", label: "Login/Cloud", icon: Database, roles: ["meister", "buero"] },
   { id: "company", label: "Firma & Team", icon: UserRound, roles: ["meister", "buero"] },
   { id: "planning", label: "Baustellenplanung", icon: BriefcaseBusiness, roles: ["meister", "buero", "vorarbeiter"] },
   { id: "notes", label: "Notizen", icon: Star, roles: ["azubi", "vorarbeiter", "monteur", "meister", "buero"] },
@@ -284,7 +283,7 @@ const databaseTables = [
 const appFunctionStatus = [
   { area: "Login", status: "Aktiv", note: "Login steht vor der App. Firmen nutzen E-Mail/Passwort, Personen nutzen Name + persönlichen Code." },
   { area: "Team-Codes", status: "Aktiv", note: "Firma erzeugt persönliche Codes für Vorarbeiter, Monteure, Azubis und Kunden." },
-  { area: "Cloud", status: "Sync-Simulation aktiv", note: "Daten werden in einem lokalen Cloud-Speicher simuliert." },
+  { area: "Cloud", status: "Auto-Sync aktiv", note: "Daten werden nach dem Login automatisch gespeichert. Bei Offline-Verbindung pausiert der Sync automatisch." },
   { area: "Aufträge", status: "Aktiv", note: "Anlegen, Bearbeiten, Suchen, Löschen, Status und lokale Speicherung funktionieren." },
   { area: "Baustellenplanung", status: "Aktiv", note: "Aufträge können Teammitgliedern und Kunden zugewiesen werden." },
   { area: "Berichtsheft", status: "Aktiv", note: "Erzeugen, Speichern, Freigeben, Löschen, Wochenbericht und Export sind als Prototyp eingebaut." },
@@ -322,7 +321,7 @@ function Field({ label, value, onChange, placeholder = "", type = "text" }) { re
 function LoginField({ label, value, onChange, placeholder = "", type = "text", autoComplete = "off" }) { return <label className="block rounded-2xl bg-slate-50 p-4 text-sm font-bold text-slate-800">{label}<input type={type} value={value ?? ""} onChange={(e) => onChange?.(e.target.value)} placeholder={placeholder} autoComplete={autoComplete} className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm font-medium outline-none placeholder:text-slate-400 placeholder:font-medium focus:border-slate-950" /></label>; }
 function TextArea({ label, value, onChange, placeholder = "" }) { return <label className="block rounded-2xl bg-slate-50 p-4 text-sm font-bold text-slate-800">{label}<textarea value={value ?? ""} onChange={(e) => onChange?.(e.target.value)} placeholder={placeholder} className="mt-2 h-28 w-full resize-none rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm font-medium outline-none focus:border-slate-950" /></label>; }
 function CopyBox({ title, text }) { const [copied, setCopied] = useState(false); const copy = async () => { try { await navigator.clipboard.writeText(text); setCopied(true); setTimeout(() => setCopied(false), 1200); } catch {} }; return <article className="rounded-3xl bg-slate-50 p-5"><h3 className="font-bold">{title}</h3><textarea readOnly value={text} className="mt-3 h-32 w-full resize-none rounded-2xl border border-slate-200 bg-white p-3 text-sm leading-6" /><button onClick={copy} className="mt-3 flex items-center gap-2 rounded-2xl bg-slate-950 px-4 py-3 text-sm font-bold text-white">{copied ? <Check size={16} /> : <Copy size={16} />}{copied ? "Kopiert" : "Text kopieren"}</button></article>; }
-function TopBar({ role, setRole, offline, setOffline, compact, currentUser, onLogout }) { const selected = roles.find((r) => r.id === role) || roles[0]; const canSwitchRole = currentUser?.role === "dev"; return <div className="sticky top-3 z-20 mb-4 rounded-[1.5rem] border border-slate-200 bg-white/90 p-3 shadow-sm backdrop-blur"><div className={compact ? "space-y-3" : "grid gap-3 md:grid-cols-[1fr_auto] md:items-center"}><div className={compact ? "space-y-2" : "flex flex-col gap-2 sm:flex-row sm:items-center"}><div className="flex items-center gap-2 rounded-2xl bg-slate-950 px-3 py-2 text-white"><UserRound size={18} /><span className="text-sm font-bold">{currentUser?.name || "Nutzer"}</span></div>{canSwitchRole ? <select value={role} onChange={(e) => setRole(e.target.value)} className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-bold outline-none sm:w-auto">{roles.map((r) => <option key={r.id} value={r.id}>{r.label}</option>)}</select> : <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-bold text-slate-700">{selected.label}</div>}{!compact && <p className="text-xs leading-5 text-slate-500">{selected.description}</p>}</div><div className="flex gap-2"><button onClick={() => setOffline(!offline)} className={`flex items-center justify-center gap-2 rounded-2xl px-4 py-3 text-sm font-bold ${offline ? "bg-emerald-100 text-emerald-800" : "bg-slate-100 text-slate-700"}`}>{offline ? <WifiOff size={18} /> : <Wifi size={18} />}{offline ? "Offline" : "Online"}</button><button onClick={onLogout} className="rounded-2xl bg-rose-100 px-4 py-3 text-sm font-bold text-rose-800">Abmelden</button></div></div></div>; }
+function TopBar({ role, setRole, offline, compact, currentUser, onLogout }) { const selected = roles.find((r) => r.id === role) || roles[0]; const canSwitchRole = currentUser?.role === "dev"; return <div className="sticky top-3 z-20 mb-4 rounded-[1.5rem] border border-slate-200 bg-white/90 p-3 shadow-sm backdrop-blur"><div className={compact ? "space-y-3" : "grid gap-3 md:grid-cols-[1fr_auto] md:items-center"}><div className={compact ? "space-y-2" : "flex flex-col gap-2 sm:flex-row sm:items-center"}><div className="flex items-center gap-2 rounded-2xl bg-slate-950 px-3 py-2 text-white"><UserRound size={18} /><span className="text-sm font-bold">{currentUser?.name || "Nutzer"}</span></div>{canSwitchRole ? <select value={role} onChange={(e) => setRole(e.target.value)} className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-bold outline-none sm:w-auto">{roles.map((r) => <option key={r.id} value={r.id}>{r.label}</option>)}</select> : <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-bold text-slate-700">{selected.label}</div>}{!compact && <p className="text-xs leading-5 text-slate-500">{selected.description}</p>}</div><div className="flex gap-2"><div className={`flex items-center justify-center gap-2 rounded-2xl px-4 py-3 text-sm font-bold ${offline ? "bg-amber-100 text-amber-900" : "bg-emerald-100 text-emerald-800"}`}>{offline ? <WifiOff size={18} /> : <Wifi size={18} />}{offline ? "Offline erkannt" : "Online"}</div><button onClick={onLogout} className="rounded-2xl bg-rose-100 px-4 py-3 text-sm font-bold text-rose-800">Abmelden</button></div></div></div>; }
 function Header({ role, orders, selectedOrder, offline, compact }) { const selectedRole = roles.find((r) => r.id === role)?.label || role; return <header className="mb-5 rounded-[2rem] bg-slate-950 p-5 text-white shadow-xl md:p-8"><div className={compact ? "space-y-4" : "grid gap-6 md:grid-cols-[1.4fr_0.6fr] md:items-center"}><div><div className="mb-3 inline-flex items-center gap-2 rounded-full bg-white/10 px-3 py-1 text-xs text-white/80 md:text-sm"><Sun size={16} />{selectedRole}</div><h1 className={compact ? "text-2xl font-black tracking-tight" : "text-3xl font-black tracking-tight md:text-5xl"}>Monteur-App</h1><p className="mt-3 max-w-2xl text-sm leading-6 text-white/75 md:text-base md:leading-7">Rollladen & Sonnenschutz Assistent</p></div>{!compact && <div className="grid grid-cols-2 gap-3"><div className="rounded-3xl bg-white/10 p-4"><p className="text-3xl font-black">{orders.length}</p><p className="text-sm text-white/70">Aufträge</p></div><div className="rounded-3xl bg-white/10 p-4"><p className="text-3xl font-black">{selectedOrder ? "Ja" : "Nein"}</p><p className="text-sm text-white/70">Aktiver Auftrag</p></div><div className="rounded-3xl bg-white/10 p-4"><p className="text-3xl font-black">{offline ? "An" : "Aus"}</p><p className="text-sm text-white/70">Offline</p></div><div className="rounded-3xl bg-white/10 p-4"><p className="text-3xl font-black">{navItems.length}</p><p className="text-sm text-white/70">Module</p></div></div>}</div></header>; }
 function MobileBottomNav({ items, active, setActive }) { const [openMore, setOpenMore] = useState(false); const mainItems = items.slice(0, 5); const moreItems = items.slice(5); return <>{openMore && <div className="fixed inset-x-3 bottom-24 z-40 max-h-[55vh] overflow-y-auto rounded-[1.5rem] border border-slate-200 bg-white p-3 shadow-2xl"><p className="mb-3 px-2 text-xs font-bold uppercase tracking-wide text-slate-500">Weitere Bereiche</p><div className="grid grid-cols-2 gap-2">{moreItems.map(({ id, label, icon: Icon }) => <button key={id} onClick={() => { setActive(id); setOpenMore(false); }} className={`flex items-center gap-2 rounded-2xl px-3 py-3 text-left text-xs font-bold ${active === id ? "bg-slate-950 text-white" : "bg-slate-50 text-slate-700"}`}><Icon size={17} />{label}</button>)}</div></div>}<nav className="fixed inset-x-0 bottom-0 z-50 border-t border-slate-200 bg-white/95 px-2 pb-[env(safe-area-inset-bottom)] pt-2 shadow-2xl backdrop-blur"><div className="grid grid-cols-6 gap-1">{mainItems.map(({ id, label, icon: Icon }) => <button key={id} onClick={() => setActive(id)} className={`flex flex-col items-center justify-center rounded-2xl px-1 py-2 text-[10px] font-bold ${active === id ? "bg-slate-950 text-white" : "text-slate-600"}`}><Icon size={18} /><span className="mt-1 max-w-full truncate">{label}</span></button>)}<button onClick={() => setOpenMore((v) => !v)} className="flex flex-col items-center justify-center rounded-2xl px-1 py-2 text-[10px] font-bold text-slate-600"><Layers size={18} /><span className="mt-1">Mehr</span></button></div></nav></>; }
 
@@ -366,7 +365,7 @@ function LoginGate({
       <Card>
         {pendingRegistration ? (
           <div>
-            <SectionTitle icon={CheckCircle2} title="E-Mail bestätigen" subtitle="Öffne den Bestätigungslink in deiner E-Mail. Du musst deine Firmendaten danach nicht nochmal eintragen." />
+            <SectionTitle icon={CheckCircle2} title="E-Mail bestätigen" subtitle="Öffne den Bestätigungslink in deiner E-Mail. Danach kannst du hier direkt weiter zur App." />
             <div className="rounded-2xl bg-emerald-50 p-4 text-sm font-bold leading-6 text-emerald-900">
               Bestätigungsmail gesendet an: {pendingRegistration.email}
             </div>
@@ -375,7 +374,7 @@ function LoginGate({
               <button onClick={resendConfirmationEmail} className="rounded-2xl bg-emerald-100 px-4 py-3 text-sm font-bold text-emerald-800">Bestätigungsmail erneut senden</button>
               <button onClick={clearPendingRegistration} className="rounded-2xl bg-slate-100 px-4 py-3 text-sm font-bold text-slate-700">Andere Daten verwenden</button>
             </div>
-            <p className="mt-4 rounded-2xl bg-amber-50 p-3 text-xs font-bold leading-5 text-amber-900">Falls du mehrere E-Mails anforderst, nutze immer den neuesten Link. Wenn Supabase nach dem Klick keine Sitzung öffnet, reicht danach E-Mail + Passwort; Name und Betrieb werden automatisch übernommen.</p>
+            <p className="mt-4 rounded-2xl bg-amber-50 p-3 text-xs font-bold leading-5 text-amber-900">Falls du mehrere E-Mails anforderst, nutze immer den neuesten Link.</p>
           </div>
         ) : (
           <div>
@@ -428,7 +427,7 @@ function DiagnosisStepMode({ trees }) { const [treeId, setTreeId] = useState(tre
 export default function App() {
   const device = useDeviceLayout();
   const [role, setRoleState] = useState(() => loadJson("rs-role", "dev"));
-  const [offline, setOfflineState] = useState(() => loadJson("rs-offline", false));
+  const [offline, setOfflineState] = useState(() => typeof navigator !== "undefined" ? !navigator.onLine : false);
   const [active, setActive] = useState("dashboard");
   const [orders, setOrders] = useState(() => loadJson("rs-orders", [{ id: "A-1001", customer: "Musterkunde GmbH", contact: "Max Mustermann", phone: "", email: "", address: "Musterstraße 1", date: todayIso(), time: "08:00", assignedTo: "Max Mustermann", product: "vorbaurollladen", substrate: "WDVS", drive: "Funkmotor", installType: "Renovierung", windCritical: true, status: "offen", priority: "normal", orderType: "Montage", notes: "3 Elemente, Funkmotor, WDVS prüfen" }]));
   const [selectedOrderId, setSelectedOrderId] = useState(() => loadJson("rs-selected-order", "A-1001"));
@@ -480,7 +479,22 @@ export default function App() {
   const [autoSyncStatus, setAutoSyncStatus] = useState("Wartet auf Login");
 
   const setRole = (value) => { setRoleState(value); saveJson("rs-role", value); };
-  const setOffline = (value) => { setOfflineState(value); saveJson("rs-offline", value); };
+  useEffect(() => {
+    const updateOnlineStatus = () => {
+      const isOffline = typeof navigator !== "undefined" ? !navigator.onLine : false;
+      setOfflineState(isOffline);
+      saveJson("rs-offline", isOffline);
+      setAutoSyncStatus(isOffline ? "Offline erkannt – Sync pausiert" : "Online – Auto-Sync bereit");
+    };
+    updateOnlineStatus();
+    window.addEventListener("online", updateOnlineStatus);
+    window.addEventListener("offline", updateOnlineStatus);
+    return () => {
+      window.removeEventListener("online", updateOnlineStatus);
+      window.removeEventListener("offline", updateOnlineStatus);
+    };
+  }, []);
+  const setOffline = () => {};
   const allowedNav = useMemo(() => role === "dev" ? navItems : navItems.filter((n) => n.roles.includes(role)), [role]);
   useEffect(() => { if (!allowedNav.some((n) => n.id === active)) setActive("dashboard"); }, [allowedNav, active]);
   useEffect(() => saveJson("rs-orders", orders), [orders]);
@@ -626,8 +640,11 @@ export default function App() {
       const { error: snapshotError } = await supabase.from("app_snapshots").upsert({ company_id: activeCompany.id, snapshot, updated_by: authData.user.id, updated_at: new Date().toISOString() });
       if (snapshotError) throw snapshotError;
       addSyncLog(options.quiet ? "Auto-Sync gespeichert" : "Supabase gespeichert");
-      if (options.quiet) setSupabaseStatus(`Automatisch synchronisiert: ${new Date().toLocaleTimeString("de-DE")}`);
-      else setBackendMessage("Daten wurden in Supabase gespeichert.");
+      if (options.quiet) {
+        const time = new Date().toLocaleTimeString("de-DE");
+        setSupabaseStatus(`Automatisch synchronisiert: ${time}`);
+        setAutoSyncStatus(`Cloud synchronisiert: ${time}`);
+      } else setBackendMessage("Daten wurden in Supabase gespeichert.");
     } catch (error) {
       addSyncLog(`Supabase Fehler: ${error.message}`, "fehler");
       if (options.quiet) setSupabaseStatus(`Auto-Sync Fehler: ${error.message}`);
@@ -661,15 +678,7 @@ export default function App() {
       if (!authData?.user) throw new Error("Kein Supabase-Nutzer angemeldet.");
       const { data: membership, error: membershipError } = await supabase.from("company_people").select("*, companies(*)").eq("auth_user_id", authData.user.id).limit(1).maybeSingle();
       if (membershipError) throw membershipError;
-      if (!membership) {
-        const meta = authData.user.user_metadata || {};
-        await createCompanyForSignedInUser({
-          name: meta.name || pendingRegistration?.name || "Max Mustermann",
-          email: authData.user.email || pendingRegistration?.email || loginForm.email,
-          company: meta.company || pendingRegistration?.company || "Muster Sonnenschutz GmbH",
-        });
-        return;
-      }
+      if (!membership) throw new Error("Für diesen Nutzer wurde noch keine Firma gefunden.");
       const nextCompany = rowToCompany(membership.companies);
       setCompany(nextCompany);
       setCloudCompanyId(nextCompany.id);
@@ -688,10 +697,9 @@ export default function App() {
       const { data: authData, error: authError } = await supabase.auth.getUser();
       if (authError) throw authError;
       if (!authData?.user) throw new Error("Bitte zuerst die E-Mail bestätigen oder einloggen.");
-      const meta = authData.user.user_metadata || {};
       const companyId = cloudCompanyId && cloudCompanyId !== "betrieb-muster" ? cloudCompanyId : `betrieb-${authData.user.id.slice(0, 8)}`;
-      const adminName = registration?.name || meta.name || loginForm.name || authData.user.email || "Max Mustermann";
-      const companyName = registration?.company || meta.company || loginForm.company || "Muster Sonnenschutz GmbH";
+      const adminName = registration?.name || loginForm.name || authData.user.email || "Firma Admin";
+      const companyName = registration?.company || loginForm.company || "Mein Betrieb";
       const { data: rpcCompany, error: rpcError } = await supabase.rpc("create_company_for_current_user", { p_company_id: companyId, p_company_name: companyName, p_admin_name: adminName });
       if (rpcError) throw rpcError;
       const nextCompany = rowToCompany(Array.isArray(rpcCompany) ? rpcCompany[0] : rpcCompany);
@@ -710,10 +718,6 @@ export default function App() {
     if (!requireSupabase()) return;
     try {
       const registration = { name: loginForm.name.trim(), email: loginForm.email.trim(), company: loginForm.company.trim(), createdAt: new Date().toISOString() };
-      if (!registration.name || !registration.email || !registration.company || !loginForm.password) {
-        setBackendMessage("Bitte Name, Betrieb, E-Mail und Passwort eintragen.");
-        return;
-      }
       const { error: signUpError } = await supabase.auth.signUp({
         email: registration.email,
         password: loginForm.password,
@@ -760,12 +764,10 @@ export default function App() {
       const { data: sessionData } = await supabase.auth.getSession();
       const user = sessionData?.session?.user;
       if (!user) {
-        setCompanyAuthMode("login");
-        setLoginForm((current) => ({ ...current, email: pendingRegistration?.email || current.email, name: pendingRegistration?.name || current.name, company: pendingRegistration?.company || current.company }));
-        setBackendMessage("Die E-Mail ist wahrscheinlich bestätigt, aber Supabase hat keine Sitzung im Browser geöffnet. Melde dich jetzt nur mit E-Mail und Passwort ein; die Firmendaten werden danach automatisch übernommen.");
+        setBackendMessage("Noch keine bestätigte Sitzung gefunden. Öffne den neuesten Bestätigungslink aus deiner E-Mail und klicke danach erneut auf 'E-Mail bestätigt – weiter'.");
         return;
       }
-      await createCompanyForSignedInUser(pendingRegistration || { name: user.user_metadata?.name, company: user.user_metadata?.company, email: user.email });
+      await createCompanyForSignedInUser(pendingRegistration || loginForm);
     } catch (error) {
       setBackendMessage(`Bestätigung konnte nicht abgeschlossen werden: ${error.message}`);
     }
@@ -954,6 +956,11 @@ export default function App() {
       setAutoSyncStatus("Wartet auf Login");
       return;
     }
+    if (offline) {
+      setInitialCloudLoaded(true);
+      setAutoSyncStatus("Offline erkannt – Cloud-Laden pausiert");
+      return;
+    }
     if (!isSupabaseConfigured || !supabase) {
       setInitialCloudLoaded(true);
       setAutoSyncStatus("Supabase nicht verbunden");
@@ -969,16 +976,21 @@ export default function App() {
       }
     }, 250);
     return () => { cancelled = true; window.clearTimeout(timer); };
-  }, [authUser?.id, authUser?.companyId]);
+  }, [authUser?.id, authUser?.companyId, offline]);
 
   useEffect(() => {
     if (!authUser || !initialCloudLoaded || !autoSyncEnabled || !isSupabaseConfigured || !supabase) return;
-    setAutoSyncStatus("Änderung erkannt, Auto-Sync wartet ...");
-    const timer = window.setTimeout(() => {
-      saveAppToSupabase(null, { quiet: true });
-    }, 1800);
+    if (offline) {
+      setAutoSyncStatus("Offline erkannt – Änderungen bleiben lokal und werden später synchronisiert");
+      return;
+    }
+    setAutoSyncStatus("Änderung erkannt – speichere gleich automatisch ...");
+    const timer = window.setTimeout(async () => {
+      setAutoSyncStatus("Speichere in der Cloud ...");
+      await saveAppToSupabase(null, { quiet: true });
+    }, 1200);
     return () => window.clearTimeout(timer);
-  }, [authUser?.id, authUser?.companyId, initialCloudLoaded, autoSyncEnabled, company, companyPeople, orders, checks, notes, savedReports, measurementValues, manualQuality, photoAnalyses]);
+  }, [authUser?.id, authUser?.companyId, initialCloudLoaded, autoSyncEnabled, offline, company, companyPeople, orders, checks, notes, savedReports, measurementValues, manualQuality, photoAnalyses]);
 
   if (!authUser) {
     return <LoginGate
@@ -1002,7 +1014,7 @@ export default function App() {
     />;
   }
 
-  return <div className={`min-h-screen bg-gradient-to-br from-slate-50 via-white to-slate-100 text-slate-950 ${device.isMobile ? "p-3 pb-24" : "p-4 md:p-8"}`}><div className="mx-auto max-w-7xl"><TopBar role={role} setRole={setRole} offline={offline} setOffline={setOffline} compact={device.isMobile} currentUser={authUser} onLogout={logoutSupabase} />{notice && <div className="mb-4 rounded-2xl bg-emerald-50 p-3 text-sm font-bold text-emerald-800">{notice}</div>}<div className="mb-4 flex flex-col gap-3 rounded-3xl border border-slate-200 bg-white p-4 shadow-sm md:flex-row md:items-center md:justify-between"><div><p className="text-xs font-bold uppercase text-slate-500">Cloud-Synchronisation</p><p className="mt-1 text-sm font-bold text-slate-700">{autoSyncStatus}</p></div><button onClick={() => setAutoSyncEnabled((v) => !v)} className={`rounded-2xl px-4 py-3 text-sm font-bold ${autoSyncEnabled ? "bg-emerald-100 text-emerald-800" : "bg-slate-100 text-slate-600"}`}>{autoSyncEnabled ? "Auto-Sync an" : "Auto-Sync aus"}</button></div><Header role={role} orders={visibleOrders} selectedOrder={selectedOrder} offline={offline} compact={device.isMobile} />{!device.isMobile && <nav className="mb-6 grid grid-cols-2 gap-3 md:grid-cols-5 xl:grid-cols-8">{allowedNav.map(({ id, label, icon: Icon }) => <button key={id} onClick={() => setActive(id)} className={`flex items-center justify-center gap-2 rounded-2xl px-3 py-3 text-sm font-bold shadow-sm transition ${active === id ? "bg-slate-950 text-white" : "bg-white text-slate-700 hover:bg-slate-100"}`}><Icon size={17} />{label}</button>)}</nav>}{device.isMobile && <MobileBottomNav items={allowedNav} active={active} setActive={setActive} />}
+  return <div className={`min-h-screen bg-gradient-to-br from-slate-50 via-white to-slate-100 text-slate-950 ${device.isMobile ? "p-3 pb-24" : "p-4 md:p-8"}`}><div className="mx-auto max-w-7xl"><TopBar role={role} setRole={setRole} offline={offline} compact={device.isMobile} currentUser={authUser} onLogout={logoutSupabase} />{notice && <div className="mb-4 rounded-2xl bg-emerald-50 p-3 text-sm font-bold text-emerald-800">{notice}</div>}<div className="mb-4 flex flex-col gap-3 rounded-3xl border border-slate-200 bg-white p-4 shadow-sm md:flex-row md:items-center md:justify-between"><div><p className="text-xs font-bold uppercase text-slate-500">Status</p><p className="mt-1 text-sm font-bold text-slate-700">{offline ? "Offline erkannt" : autoSyncStatus}</p></div><div className={`rounded-2xl px-4 py-3 text-sm font-bold ${offline ? "bg-amber-100 text-amber-900" : "bg-emerald-100 text-emerald-800"}`}>{offline ? "Lokaler Modus" : "Auto-Sync aktiv"}</div></div><Header role={role} orders={visibleOrders} selectedOrder={selectedOrder} offline={offline} compact={device.isMobile} />{!device.isMobile && <nav className="mb-6 grid grid-cols-2 gap-3 md:grid-cols-5 xl:grid-cols-8">{allowedNav.map(({ id, label, icon: Icon }) => <button key={id} onClick={() => setActive(id)} className={`flex items-center justify-center gap-2 rounded-2xl px-3 py-3 text-sm font-bold shadow-sm transition ${active === id ? "bg-slate-950 text-white" : "bg-white text-slate-700 hover:bg-slate-100"}`}><Icon size={17} />{label}</button>)}</nav>}{device.isMobile && <MobileBottomNav items={allowedNav} active={active} setActive={setActive} />}
 
   {active === "dashboard" && screen(<div className="grid gap-5 lg:grid-cols-[1.1fr_0.9fr]"><Card><SectionTitle icon={Home} title="Start / Tagesübersicht" subtitle="Schneller Einstieg in offene Aufträge, Fotos, Checklisten, Kundenkommunikation und Protokolle." /><div className="grid gap-3 md:grid-cols-2">{orders.slice(0, 4).map((o) => <button key={o.id} onClick={() => { setSelectedOrderId(o.id); setActive("orders"); }} className="rounded-3xl bg-slate-50 p-4 text-left hover:bg-white hover:shadow-md"><div className="flex items-center justify-between"><strong>{o.id}</strong><Badge>{o.priority}</Badge></div><p className="mt-2 font-bold">{o.customer}</p><p className="text-sm text-slate-600">{o.address}</p><p className="mt-2 text-xs text-slate-500">{productTypes.find((p) => p.id === o.product)?.name}</p></button>)}</div></Card><Card><SectionTitle icon={BriefcaseBusiness} title="Aktiver Auftrag" subtitle="Alle Module beziehen sich auf diesen Auftrag." />{selectedOrder && <div className="rounded-3xl bg-slate-50 p-5"><h3 className="text-xl font-black">{selectedOrder.customer}</h3><p className="mt-2 text-sm text-slate-600">{selectedOrder.address}</p><div className="mt-3 flex flex-wrap gap-2"><Badge>{selectedOrder.id}</Badge><Badge>{selectedProduct.name}</Badge><Badge>{selectedOrder.status}</Badge></div><p className="mt-4 text-sm leading-6 text-slate-600">{selectedOrder.notes}</p></div>}</Card></div>)}
   {active === "today" && screen(<div className="grid gap-5 lg:grid-cols-[1fr_0.8fr]"><Card><SectionTitle icon={ClipboardList} title="Heute / Tagesplanung" subtitle="Heutige Aufträge, offene Berichte und Schnellaktionen." /><div className="grid gap-3 md:grid-cols-3"><div className="rounded-3xl bg-slate-50 p-4"><p className="text-3xl font-black">{todaysOrders.length}</p><p className="text-sm text-slate-600">heutige Aufträge</p></div><div className="rounded-3xl bg-slate-50 p-4"><p className="text-3xl font-black">{openReports.length}</p><p className="text-sm text-slate-600">offene Berichte</p></div><div className="rounded-3xl bg-slate-50 p-4"><p className="text-3xl font-black">{Object.keys(photos).length}</p><p className="text-sm text-slate-600">Fotos</p></div></div><div className="mt-5 space-y-3">{todaysOrders.length === 0 && <div className="rounded-2xl bg-slate-50 p-4 text-sm font-bold text-slate-600">Heute sind noch keine Aufträge geplant.</div>}{todaysOrders.map((o) => <button key={o.id} onClick={() => { setSelectedOrderId(o.id); setActive("orders"); }} className="w-full rounded-3xl bg-slate-50 p-4 text-left hover:bg-white hover:shadow-md"><div className="flex items-center justify-between"><strong>{o.time} · {o.customer}</strong><Badge>{o.status}</Badge></div><p className="mt-1 text-sm text-slate-600">{o.address}</p><div className="mt-2 flex flex-wrap gap-2"><Badge>{productTypes.find((p) => p.id === o.product)?.name}</Badge><Badge>{o.assignedTo || "ohne Monteur"}</Badge></div></button>)}</div></Card><Card><SectionTitle icon={CheckCircle2} title="Schnellprüfung" subtitle="Was heute offen sein könnte." /><div className="space-y-3">{["Aufträge mit Status offen prüfen", "Checklisten vor Ort abhaken", "Vorher-/Nachher-Fotos ergänzen", "Berichtsheft am Tagesende speichern", "Kundennachricht bei Verzögerung senden"].map((item) => <div key={item} className="rounded-2xl bg-slate-50 p-4 text-sm font-bold">{item}</div>)}</div></Card></div>)}
@@ -1027,7 +1039,7 @@ export default function App() {
   {active === "safety" && screen(<div className="grid gap-5 lg:grid-cols-[0.8fr_1.2fr]"><Card><SectionTitle icon={AlertTriangle} title="Sicherheits- und Warnsystem" subtitle="Kritische Kombinationen werden sichtbar gemacht." /><div className="space-y-3">{["WDVS: Lastabtragung und Abdichtung prüfen", "Markise: hohe Hebel- und Zugkräfte", "Elektro: Spannungsfreiheit und fachgerechte Messung", "Wind: Herstellerangaben und Sensorik beachten"].map((w) => <div key={w} className="rounded-2xl bg-amber-50 p-4 text-sm font-bold text-amber-900">{w}</div>)}</div></Card><Card><SectionTitle icon={ShieldCheck} title="Warnhinweise" subtitle="Nicht als automatische Freigabe nutzen." /><p className="text-sm leading-6 text-slate-600">Herstellerangaben, Untergrund, Befestigung, Gebäudehöhe und Fachprüfung bleiben verbindlich.</p></Card></div>)}
   {active === "norms" && screen(<Card><SectionTitle icon={ShieldCheck} title="Normen & Windklassen" subtitle="Orientierung, keine automatische Freigabe." /><div className="grid gap-4 md:grid-cols-2">{norms.map((n) => <article key={n.title} className="rounded-3xl bg-slate-50 p-5"><h3 className="font-black">{n.title}</h3><p className="mt-2 text-sm leading-6 text-slate-600">{n.text}</p></article>)}</div></Card>)}
   {active === "pdf" && screen(<div className="grid gap-5 lg:grid-cols-[0.8fr_1.2fr]"><Card><SectionTitle icon={Download} title="PDF-Export Vorbereitung" subtitle="Browser-Druck/PDF und Exportvorschau." /><select value={pdfTarget} onChange={(e) => setPdfTarget(e.target.value)} className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-bold"><option>Montageprotokoll</option><option>Aufmaßblatt</option><option>Wartungsprotokoll</option><option>Kundenübergabe</option><option>Angebotsentwurf</option><option>Berichtsheft-Eintrag</option></select><button onClick={() => window.print()} className="mt-4 flex w-full items-center justify-center gap-2 rounded-2xl bg-slate-950 px-4 py-3 text-sm font-bold text-white"><Printer size={18} />Druck/PDF öffnen</button></Card><Card><SectionTitle icon={FileText} title="Vorschau" subtitle="Diese Daten würden in den Export einfließen." /><div className="rounded-3xl bg-slate-50 p-5 text-sm leading-7"><strong>{pdfTarget}</strong><br />Auftrag: {selectedOrder?.id}<br />Kunde: {selectedOrder?.customer}<br />Produkt: {selectedProduct.name}<br />Notizen: {selectedOrder?.notes}</div></Card></div>)}
-  {active === "offline" && screen(<Card><SectionTitle icon={WifiOff} title="Offline-Modus" subtitle="Status wird lokal gespeichert. Später: Aufträge, Fotos, Checklisten und Protokolle synchronisieren." /><button onClick={() => setOffline(!offline)} className={`rounded-2xl px-5 py-3 text-sm font-black ${offline ? "bg-emerald-100 text-emerald-800" : "bg-slate-950 text-white"}`}>{offline ? "Offline aktiv" : "Offline aktivieren"}</button><div className="mt-5 grid gap-3 md:grid-cols-3">{["Aufträge offline", "Fotos zwischenspeichern", "Checklisten abhaken", "Protokolle schreiben", "später synchronisieren", "Konflikte anzeigen"].map((i) => <div key={i} className="rounded-2xl bg-slate-50 p-4 text-sm font-bold">{i}</div>)}</div></Card>)}
+  {active === "offline" && screen(<Card><SectionTitle icon={WifiOff} title="Offline / Online-Erkennung" subtitle="Die App erkennt automatisch, ob eine Internetverbindung vorhanden ist. Manuelles Umschalten ist nicht mehr nötig." /><div className={`rounded-3xl p-5 text-sm font-black ${offline ? "bg-amber-50 text-amber-900" : "bg-emerald-50 text-emerald-900"}`}>{offline ? "Offline erkannt: Änderungen bleiben lokal gespeichert und werden synchronisiert, sobald du wieder online bist." : "Online erkannt: Cloud-Synchronisation ist aktiv."}</div><div className="mt-5 grid gap-3 md:grid-cols-3">{["Aufträge lokal nutzbar", "Fotos zwischenspeichern", "Checklisten abhaken", "Protokolle schreiben", "Auto-Sync bei Online-Verbindung", "Konflikte später anzeigen"].map((i) => <div key={i} className="rounded-2xl bg-slate-50 p-4 text-sm font-bold">{i}</div>)}</div></Card>)}
   {active === "rights" && screen(<Card><SectionTitle icon={Settings} title="Rechte-System" subtitle="Welche Rolle darf was? Dev sieht alles." /><div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{roles.map((r) => <article key={r.id} className="rounded-3xl bg-slate-50 p-5"><h3 className="font-black">{r.label}</h3><p className="mt-2 text-sm text-slate-600">{r.description}</p><div className="mt-3 flex flex-wrap gap-2">{(r.id === "dev" ? navItems : navItems.filter((n) => n.roles.includes(r.id))).map((n) => <Badge key={n.id}>{n.label}</Badge>)}</div></article>)}</div></Card>)}
 
   {active === "company" && screen(<div className="space-y-5"><div className="grid gap-5 lg:grid-cols-[0.9fr_1.1fr]"><Card><SectionTitle icon={UserRound} title="Firma & Team" subtitle="Firma legt Vorarbeiter, Monteure, Azubis und Kunden an. Jede Person bekommt einen persönlichen Zugangscode für die Anmeldung vor der App." /><div className="rounded-3xl bg-slate-50 p-4"><p className="text-xs font-bold uppercase text-slate-500">Betrieb</p><Field label="Firmenname" value={company.name} onChange={(v) => setCompany({ ...company, name: v })} /><p className="mt-3 rounded-2xl bg-white p-3 text-sm font-bold leading-6 text-slate-600">Allgemeine Firmen-Codes wurden entfernt. Die Firma erstellt Personen direkt im Verzeichnis; jede Person erhält ihren eigenen Zugangscode.</p></div><div className="mt-5 rounded-3xl bg-white p-0"><h3 className="mb-3 font-black">Person erstellen</h3><div className="grid gap-3 md:grid-cols-2"><Field label="Name" value={personForm.name} onChange={(v) => setPersonForm({ ...personForm, name: v })} placeholder="z. B. Max Mustermann" /><label className="block rounded-2xl bg-slate-50 p-4 text-sm font-bold">Rolle<select value={personForm.role} onChange={(e) => setPersonForm({ ...personForm, role: e.target.value })} className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-3">{teamRoleOptions.map((r) => <option key={r.id} value={r.id}>{r.label}</option>)}</select></label><Field label="Telefon" value={personForm.phone} onChange={(v) => setPersonForm({ ...personForm, phone: v })} placeholder="optional" /><Field label={personForm.role === "kunde" ? "Adresse" : "Adresse / Bereich"} value={personForm.address} onChange={(v) => setPersonForm({ ...personForm, address: v })} placeholder={personForm.role === "kunde" ? "z. B. Musterstraße 1" : "optional"} />{personForm.role !== "kunde" && <Field label="Kolonne / Team" value={personForm.team} onChange={(v) => setPersonForm({ ...personForm, team: v })} placeholder="z. B. Kolonne 1" />}{personForm.role === "azubi" && <label className="block rounded-2xl bg-slate-50 p-4 text-sm font-bold">Ausbildungsjahr<select value={personForm.trainingYear} onChange={(e) => setPersonForm({ ...personForm, trainingYear: e.target.value })} className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-3"><option value="1">1. Ausbildungsjahr</option><option value="2">2. Ausbildungsjahr</option><option value="3">3. Ausbildungsjahr</option></select></label>}</div><button onClick={createCompanyPerson} className="mt-4 w-full rounded-2xl bg-slate-950 px-4 py-3 text-sm font-black text-white">Person anlegen & persönlichen Code erzeugen</button></div></Card><Card><SectionTitle icon={ClipboardList} title="Team-Übersicht" subtitle="Schneller Überblick über aktive Personen in der Firma." /><div className="grid gap-3 md:grid-cols-2"><div className="rounded-3xl bg-slate-50 p-4"><p className="text-3xl font-black">{teamMembers.length}</p><p className="text-sm text-slate-600">Teammitglieder</p></div><div className="rounded-3xl bg-slate-50 p-4"><p className="text-3xl font-black">{companyCustomers.length}</p><p className="text-sm text-slate-600">Kunden</p></div></div><div className="mt-4 rounded-3xl bg-emerald-50 p-4 text-sm font-bold leading-6 text-emerald-900">Personen, Kunden und Baustellen können hier übersichtlich verwaltet werden.</div></Card></div><Card><SectionTitle icon={Search} title="Verzeichnis" subtitle="Firma sieht alle Vorarbeiter, Monteure, Azubis und Kunden inklusive persönlichem Code, Status, Lernfortschritt und Baustellen." /><div className="mb-4 flex items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3"><Search size={18} /><input value={teamSearch} onChange={(e) => setTeamSearch(e.target.value)} placeholder="Suchen: Name, Code, Rolle, Status ..." className="w-full outline-none" /></div><div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{filteredCompanyPeople.map((p) => { const assignedCount = orders.filter((o) => (o.assignedMemberIds || []).includes(p.id) || o.customerPersonId === p.id).length; return <article key={p.id} className="rounded-3xl bg-slate-50 p-5"><div className="flex items-start justify-between gap-3"><div><h3 className="font-black">{p.name}</h3><p className="mt-1 text-sm text-slate-600">{personRoleLabel(p.role)} · {p.role === "kunde" ? (p.address || "ohne Adresse") : (p.team || p.address || "ohne Bereich")}</p></div><Badge>{p.status}</Badge></div><div className="mt-3"><CopyBox title="Persönlicher Zugangscode" text={p.accessCode} /></div>{p.role === "azubi" && <div className="mt-3 rounded-2xl bg-white p-3"><p className="text-xs font-bold uppercase text-slate-500">Lernfortschritt</p><input type="range" min="0" max="100" value={p.progress || 0} onChange={(e) => updateAzubiProgress(p.id, e.target.value)} className="mt-2 w-full" /><p className="text-sm font-black">{p.progress || 0}% · {p.trainingYear || "?"}. Ausbildungsjahr</p></div>}<div className="mt-3 grid grid-cols-2 gap-2"><button onClick={() => setPersonStatus(p.id, p.status === "aktiv" ? "inaktiv" : "aktiv")} className="rounded-2xl bg-slate-950 px-3 py-2 text-xs font-bold text-white">{p.status === "aktiv" ? "Deaktivieren" : "Aktivieren"}</button><button onClick={() => regeneratePersonCode(p.id)} className="rounded-2xl bg-slate-100 px-3 py-2 text-xs font-bold">Code neu</button><button onClick={() => deletePerson(p.id)} className="rounded-2xl bg-rose-100 px-3 py-2 text-xs font-bold text-rose-800">Löschen</button><div className="rounded-2xl bg-white px-3 py-2 text-xs font-bold text-slate-600">{assignedCount} Baustellen</div></div></article>; })}</div></Card></div>)}
