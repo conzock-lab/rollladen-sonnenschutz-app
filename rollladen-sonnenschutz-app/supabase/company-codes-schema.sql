@@ -15,13 +15,15 @@ create table if not exists public.companies (
   id text primary key,
   name text not null,
   owner_id uuid references auth.users(id) on delete set null,
-  admin_code text default public.make_access_code('ADM'),
-  azubi_code text default public.make_access_code('AZU'),
-  customer_code text default public.make_access_code('KUN'),
-  monteur_code text default public.make_access_code('MON'),
   created_at timestamptz default now(),
   updated_at timestamptz default now()
 );
+
+-- Veraltete allgemeine Rollen-Codes entfernen; Zugänge liegen ausschließlich an Personen.
+alter table public.companies drop column if exists admin_code;
+alter table public.companies drop column if exists azubi_code;
+alter table public.companies drop column if exists customer_code;
+alter table public.companies drop column if exists monteur_code;
 
 create table if not exists public.company_people (
   id text primary key,
@@ -29,7 +31,7 @@ create table if not exists public.company_people (
   name text not null,
   role text not null check (role in ('dev','meister','buero','vorarbeiter','monteur','azubi','kunde')),
   access_code text not null unique,
-  status text not null default 'aktiv' check (status in ('aktiv','inaktiv','wartet auf Freigabe')),
+  status text not null default 'aktiv' check (status in ('aktiv','inaktiv','archiviert','wartet auf Freigabe')),
   phone text default '',
   address text default '',
   team text default '',
@@ -39,6 +41,11 @@ create table if not exists public.company_people (
   created_at timestamptz default now(),
   updated_at timestamptz default now()
 );
+
+-- Bestehende Installationen um den Archivstatus ergänzen. Neue Kunden werden direkt als "aktiv" angelegt.
+alter table public.company_people drop constraint if exists company_people_status_check;
+alter table public.company_people add constraint company_people_status_check
+  check (status in ('aktiv','inaktiv','archiviert','wartet auf Freigabe'));
 
 create table if not exists public.orders (
   id text primary key,
@@ -192,10 +199,6 @@ begin
     'company', jsonb_build_object(
       'id', v_company.id,
       'name', v_company.name,
-      'adminCode', v_company.admin_code,
-      'azubiCode', v_company.azubi_code,
-      'customerCode', v_company.customer_code,
-      'monteurCode', v_company.monteur_code,
       'createdAt', to_char(v_company.created_at, 'DD.MM.YYYY HH24:MI')
     ),
     'person', jsonb_build_object(
@@ -210,6 +213,77 @@ begin
       'trainingYear', v_person.training_year,
       'progress', v_person.progress
     )
+  );
+end;
+$$;
+
+-- Liefert Kunden ausschließlich ihre Aufträge und die dazugehörigen Dokumentmetadaten.
+-- Interne Snapshot-Bereiche (Notizen, Team, Fotos, Lern- und Dev-Daten) verlassen die Datenbank nicht.
+create or replace function public.get_customer_portal_data(p_company_id text)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_person public.company_people;
+  v_orders jsonb := '[]'::jsonb;
+  v_documents jsonb := '[]'::jsonb;
+begin
+  select * into v_person
+  from public.company_people
+  where company_id = p_company_id
+    and auth_user_id = auth.uid()
+    and role = 'kunde'
+    and status = 'aktiv'
+  limit 1;
+
+  if not found then
+    raise exception 'Kein aktiver Kundenzugang für diese Firma.';
+  end if;
+
+  select coalesce(jsonb_agg(jsonb_build_object(
+    'id', o.data ->> 'id',
+    'customerPersonId', o.data ->> 'customerPersonId',
+    'customer', o.data ->> 'customer',
+    'date', o.data ->> 'date',
+    'time', o.data ->> 'time',
+    'status', o.data ->> 'status',
+    'address', o.data ->> 'address',
+    'product', o.data ->> 'product',
+    'contactPerson', coalesce(nullif(trim(split_part(o.data ->> 'assignedTo', ',', 1)), ''), 'Ihr Kundenservice'),
+    'customerConfirmed', coalesce(o.data -> 'customerConfirmed', 'false'::jsonb),
+    'customerConfirmedAt', o.data ->> 'customerConfirmedAt'
+  ) order by o.updated_at), '[]'::jsonb)
+  into v_orders
+  from public.orders o
+  where o.company_id = p_company_id
+    and (
+      (o.data ->> 'customerPersonId') = v_person.id
+      or (o.data ->> 'customer') = v_person.name
+    );
+
+  select coalesce(jsonb_agg(jsonb_build_object(
+    'id', document.value ->> 'id',
+    'orderId', document.value ->> 'orderId',
+    'fileName', document.value ->> 'fileName',
+    'template', document.value ->> 'template',
+    'status', document.value ->> 'status',
+    'createdAt', document.value ->> 'createdAt'
+  )), '[]'::jsonb)
+  into v_documents
+  from public.app_snapshots snapshot
+  cross join lateral jsonb_array_elements(coalesce(snapshot.snapshot -> 'pdfDocuments', '[]'::jsonb)) document
+  where snapshot.company_id = p_company_id
+    and exists (
+      select 1
+      from jsonb_array_elements(v_orders) customer_order
+      where customer_order ->> 'id' = document.value ->> 'orderId'
+    );
+
+  return jsonb_build_object(
+    'orders', v_orders,
+    'pdfDocuments', v_documents
   );
 end;
 $$;
@@ -234,16 +308,20 @@ with check (owner_id = auth.uid() or public.is_company_admin(id));
 
 drop policy if exists people_select_company on public.company_people;
 create policy people_select_company on public.company_people
-for select using (auth_user_id = auth.uid() or public.current_company_role(company_id) is not null);
+for select using (
+  auth_user_id = auth.uid()
+  or public.current_company_role(company_id) in ('dev','meister','buero','vorarbeiter','monteur','azubi')
+);
 
 drop policy if exists people_insert_admin on public.company_people;
 create policy people_insert_admin on public.company_people
 for insert with check (public.is_company_admin(company_id));
 
 drop policy if exists people_update_admin_or_self on public.company_people;
-create policy people_update_admin_or_self on public.company_people
-for update using (auth_user_id = auth.uid() or public.is_company_admin(company_id))
-with check (auth_user_id = auth.uid() or public.is_company_admin(company_id));
+drop policy if exists people_update_admin on public.company_people;
+create policy people_update_admin on public.company_people
+for update using (public.is_company_admin(company_id))
+with check (public.is_company_admin(company_id));
 
 drop policy if exists people_delete_admin on public.company_people;
 create policy people_delete_admin on public.company_people
@@ -251,7 +329,13 @@ for delete using (public.is_company_admin(company_id));
 
 drop policy if exists orders_select_assigned on public.orders;
 create policy orders_select_assigned on public.orders
-for select using (public.is_assigned_to_order(company_id, data));
+for select using (
+  public.current_company_role(company_id) in ('dev','meister','buero')
+  or (
+    public.current_company_role(company_id) in ('vorarbeiter','monteur','azubi')
+    and public.is_assigned_to_order(company_id, data)
+  )
+);
 
 drop policy if exists orders_insert_admin on public.orders;
 create policy orders_insert_admin on public.orders
@@ -267,7 +351,7 @@ for delete using (public.is_company_admin(company_id));
 
 drop policy if exists snapshots_select_member on public.app_snapshots;
 create policy snapshots_select_member on public.app_snapshots
-for select using (public.current_company_role(company_id) is not null);
+for select using (public.current_company_role(company_id) in ('dev','meister','buero','vorarbeiter','monteur','azubi'));
 
 drop policy if exists snapshots_insert_admin on public.app_snapshots;
 create policy snapshots_insert_admin on public.app_snapshots

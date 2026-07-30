@@ -1,0 +1,91 @@
+const allProducts = ["vorbaurollladen", "aufsatzrollladen", "markise", "raffstore", "zipscreen", "insektenschutz", "rolltor"];
+
+export const norms = [
+  {
+    id: "aussenabschluesse",
+    category: "Produkt",
+    title: "Außenabschlüsse – DIN EN 13659 als Orientierung",
+    text: "Für Rollläden und Raffstores sind unter anderem sichere Bedienung, dokumentierte Produktdaten und die vorgesehene Einbausituation wichtig. Die konkrete Bewertung erfolgt mit Herstellerunterlagen und Auftragsdaten.",
+    products: ["vorbaurollladen", "aufsatzrollladen", "raffstore"],
+    checks: ["Produkt und Ausführung eindeutig bestimmt", "Einbausituation und Windlage dokumentiert", "Bedienung und sichere Nutzung geprüft", "Herstellerunterlagen dem Auftrag zugeordnet"],
+  },
+  {
+    id: "markisen",
+    category: "Produkt",
+    title: "Markisen – DIN EN 13561 als Orientierung",
+    text: "Bei Markisen stehen bestimmungsgemäße Nutzung, Windbelastung, Montagekonzept und Kundenhinweise im Vordergrund. Eine Windklasse allein ist keine Montagefreigabe.",
+    products: ["markise", "pergola"],
+    checks: ["Markisentyp, Größe und Ausfall erfasst", "Untergrund und Konsolenplan geprüft", "Windhinweis mit Kunde besprochen", "Übergabe und Bedienung dokumentiert"],
+  },
+  {
+    id: "textilscreens",
+    category: "Produkt",
+    title: "ZIP-Screen und textiler Sonnenschutz",
+    text: "Schienenparallelität, Tuchlauf, Endlagen und Windhinweise praxisnah prüfen. Produktgrenzen und zulässige Abmessungen kommen aus den Herstellerunterlagen.",
+    products: ["zipscreen", "screen_offen", "terrassendach"],
+    checks: ["Öffnung und Schienenparallelität geprüft", "Tuchlauf ohne Klemmen getestet", "Endlagen mit Reserve kontrolliert", "Wind- und Bedienhinweis dokumentiert"],
+  },
+  {
+    id: "tore-sicherheit",
+    category: "Sicherheit",
+    title: "Rolltor und kraftbetätigte Anlage",
+    text: "Sicherheitseinrichtungen dürfen nicht überbrückt werden. Torlauf, Notbedienung, Schutzbereiche und Abschaltung müssen zur konkreten Anlage geprüft und protokolliert werden.",
+    products: ["rolltor", "garagentor_antrieb"],
+    checks: ["Laufweg und Gefahrenstellen abgesichert", "Sicherheitseinrichtungen funktionsgeprüft", "Notbedienung praktisch vorgeführt", "Prüfergebnis und Abweichungen dokumentiert"],
+    safety: true,
+  },
+  {
+    id: "elektro",
+    category: "Sicherheit",
+    title: "Elektrische Arbeiten und Motoranschluss",
+    text: "Vor Anschluss oder Fehlersuche Anlage identifizieren, spannungsfreien Zustand fachgerecht herstellen und Schaltunterlagen verwenden. Arbeiten am Netzanschluss gehören in die Hände einer Elektrofachkraft.",
+    products: allProducts,
+    checks: ["Motortyp und Anschlussart festgestellt", "Zuständigkeit der Elektrofachkraft geklärt", "Hersteller-Schaltbild vorhanden", "Funktion und Drehrichtung sicher getestet"],
+    safety: true,
+  },
+  {
+    id: "wind-sensorik",
+    category: "Wind & Sensorik",
+    title: "Wind, Sensorik und Automatik",
+    text: "Windwächter und Automationen unterstützen den Betrieb, ersetzen aber weder die zulässige Produktanwendung noch die Kundeneinweisung. Montageort und Vorranglogik müssen zur Anlage passen.",
+    products: ["markise", "raffstore", "zipscreen", "screen_offen", "pergola", "terrassendach"],
+    checks: ["Windlage am Gebäude bewertet", "Sensorposition plausibel geprüft", "Automatik und Handbetrieb getestet", "Verhalten bei Wind dem Kunden erklärt"],
+  },
+  {
+    id: "befestigung",
+    category: "Befestigung",
+    title: "Befestigung, Zulassung und Lastweg",
+    text: "Befestigungsmittel nach tragendem Untergrund, Last, Randabstand und Montagesituation auswählen. Bei WDVS, Lochstein oder Mischmauerwerk ist die Systemfreigabe besonders wichtig.",
+    products: allProducts,
+    checks: ["Tragender Untergrund bestimmt", "Befestigungssystem nach Herstellerangabe gewählt", "Bohrloch und Randabstände geprüft", "Befestigung und Abdichtung fotografiert"],
+    safety: true,
+  },
+  {
+    id: "arbeitsschutz",
+    category: "Arbeitsschutz",
+    title: "Leiter, Gerüst und Montagebereich",
+    text: "Vor Montage Zugang, Standplatz, Wetter, Hebehilfe und Absperrung bewerten. Bei schweren oder hoch montierten Anlagen Montageablauf im Team festlegen.",
+    products: allProducts,
+    checks: ["Sicherer Zugang und Standplatz vorhanden", "PSA und Absperrung vorbereitet", "Gewicht und Hebehilfe geklärt", "Wetter und Wind vor Beginn geprüft"],
+    safety: true,
+  },
+  {
+    id: "wartung",
+    category: "Betrieb",
+    title: "Wartung ohne automatische Freigabe",
+    text: "Wartung bedeutet Sicht-, Funktions- und Sicherheitsprüfung nach Produkt und Hersteller. Auffälligkeiten werden dokumentiert; sicherheitsrelevante Mängel werden nicht durch einen Haken freigegeben.",
+    products: allProducts,
+    checks: ["Anlage vor Wartung eindeutig identifiziert", "Verschleiß und Befestigung geprüft", "Sicherheitsrelevante Mängel gekennzeichnet", "Nächste Maßnahme mit Kunde abgestimmt"],
+  },
+  {
+    id: "dokumentation",
+    category: "Dokumentation",
+    title: "Auftrag, Übergabe und Bedenkenhinweis",
+    text: "Maße, Produktdaten, Untergrund, Fotos, Einstellungen, Einweisung und offene Punkte gehören nachvollziehbar zum Auftrag. Unklare oder ungeeignete Bedingungen vor Ausführung ansprechen.",
+    products: allProducts,
+    checks: ["Vorher-, Detail- und Nachher-Fotos vorhanden", "Typenschild und Einstellungen erfasst", "Kundeneinweisung dokumentiert", "Offene Punkte oder Bedenken festgehalten"],
+  },
+];
+
+export const extraNorms = [];
+export const allNorms = norms;

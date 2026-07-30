@@ -6,7 +6,6 @@ import {
   BriefcaseBusiness,
   Calculator,
   Camera,
-  Check,
   CheckCircle2,
   ChevronRight,
   ClipboardCheck,
@@ -37,28 +36,56 @@ import {
   Sun,
   Upload,
   UserRound,
-  Wifi,
-  WifiOff,
   Wind,
   Wrench,
   Zap,
 } from "lucide-react";
+import Card from "./components/Card";
+import SectionTitle from "./components/SectionHeader";
+import { Field, LoginField, TextArea } from "./components/Field";
+import StatusBadge from "./components/StatusBadge";
+import MiniCheck, { Badge } from "./components/CheckItem";
+import CopyBox from "./components/CopyBox";
+import useOnlineStatus from "./hooks/useOnlineStatus";
+import useAutoSync from "./hooks/useAutoSync";
+import useLocalStorage, { loadJson, saveJson } from "./hooks/useLocalStorage";
 import { supabase, isSupabaseConfigured } from "./lib/supabase";
+import { enqueueSyncItem, ensureRetryQueued, markQueueSynced as markQueueItemsSynced, queueLocalChange as replaceLocalChange } from "./lib/syncQueue";
+import { buildPdfPreview, createPdfFileName } from "./lib/pdfHelpers";
+import { buildPartRequestText, createEmptyPartRequest, PART_PHOTO_REQUIREMENTS } from "./lib/partsHelpers";
+import { productTypes, checklistTemplates, dynamicChecklistRules, measurementRequiredFields } from "./data/products";
+import { allManufacturers } from "./data/manufacturers";
+import { allDiagnosisTrees, allPartCatalog } from "./data/diagnosis";
+import { reportActivityTemplates, reportLearningFields, reportTechnicalTerms, quizCards, sketchCards, azubiLearningModules, allQuizCards, expandedLearningModules, learningModules, isLearningModuleComplete } from "./data/learningModules";
+import { roles, roleHomeConfig, teamRoleOptions } from "./data/rights";
+import DashboardPage from "./pages/DashboardPage";
+import OrdersPage from "./pages/OrdersPage";
+import WorkflowPage from "./pages/WorkflowPage";
+import CloseOrderPage from "./pages/CloseOrderPage";
+import PdfExportPage from "./pages/PdfExportPage";
+import SketchesPage from "./pages/SketchesPage";
+import LearningPage from "./pages/LearningPage";
+import RightsPage from "./pages/RightsPage";
+import CompanyTeamPage from "./pages/CompanyTeamPage";
+import MaintenancePage from "./pages/MaintenancePage";
+import NormsPage from "./pages/NormsPage";
+import PartsPage from "./pages/PartsPage";
+import ManufacturersPage from "./pages/ManufacturersPage";
+import DiagnosisPage from "./pages/DiagnosisPage";
+import MotorsPage from "./pages/MotorsPage";
+import SubstratesPage from "./pages/SubstratesPage";
+import ToolsPage from "./pages/ToolsPage";
+import ProductLexiconPage from "./pages/ProductLexiconPage";
+import CustomerPortalPage from "./pages/CustomerPortalPage";
 
 const todayIso = () => new Date().toISOString().slice(0, 10);
 
-function loadJson(key, fallback) {
-  try {
-    const value = localStorage.getItem(key);
-    return value ? JSON.parse(value) : fallback;
-  } catch {
-    return fallback;
-  }
-}
-function saveJson(key, value) {
-  try {
-    localStorage.setItem(key, JSON.stringify(value));
-  } catch {}
+function withTimeout(promise, timeoutMs = 15000) {
+  let timeoutId;
+  const timeout = new Promise((_, reject) => {
+    timeoutId = window.setTimeout(() => reject(new Error("Cloud-Anfrage hat zu lange gedauert.")), timeoutMs);
+  });
+  return Promise.race([promise, timeout]).finally(() => window.clearTimeout(timeoutId));
 }
 function useDeviceLayout() {
   const [device, setDevice] = useState({ type: "desktop", isMobile: false, isTablet: false, isDesktop: true, isTouch: false });
@@ -79,15 +106,6 @@ function useDeviceLayout() {
   return device;
 }
 
-const roles = [
-  { id: "dev", label: "Dev / Alles sehen", description: "Entwickleransicht mit allen App-Bereichen." },
-  { id: "azubi", label: "Azubi", description: "Lernen, Berichtsheft, Grundlagen, Sicherheit und einfache Baustellenhilfe." },
-  { id: "vorarbeiter", label: "Vorarbeiter", description: "Kolonne, Baustellenzuweisung, Teamfortschritt, Fotos und Abschlussprüfung." },
-  { id: "monteur", label: "Monteur / Geselle", description: "Aufträge, Montage, Diagnose, Fotos, Protokolle und Ersatzteile." },
-  { id: "meister", label: "Meister / Bauleiter", description: "Planung, Qualität, Normen, Freigaben, Kalkulation und Sicherheit." },
-  { id: "buero", label: "Büro", description: "Aufmaß, Angebote, Kundenkommunikation, PDF und Auftragsverwaltung." },
-  { id: "kunde", label: "Kunde", description: "Pflege, Wartung, Bedienhinweise und Übergabeinformationen." },
-];
 
 const navItems = [
   { id: "dashboard", label: "Start", icon: Home, roles: ["azubi", "vorarbeiter", "monteur", "meister", "buero", "kunde"] },
@@ -106,17 +124,16 @@ const navItems = [
   { id: "offers", label: "Angebot", icon: Euro, roles: ["meister", "buero"] },
   { id: "photos", label: "Foto-KI", icon: Camera, roles: ["azubi", "vorarbeiter", "monteur", "meister", "buero"] },
   { id: "parts", label: "Ersatzteile", icon: PackageSearch, roles: ["vorarbeiter", "monteur", "meister", "buero"] },
-  { id: "customers", label: "Kunden", icon: MessageSquareText, roles: ["vorarbeiter", "monteur", "meister", "buero", "kunde"] },
+  { id: "customers", label: "Kunden", icon: MessageSquareText, roles: ["vorarbeiter", "monteur", "meister", "buero"] },
   { id: "portal", label: "Kundenportal", icon: Home, roles: ["kunde", "meister", "buero"] },
-  { id: "maintenance", label: "Wartung", icon: RefreshCw, roles: ["azubi", "vorarbeiter", "monteur", "meister", "kunde"] },
-  { id: "learning", label: "Lernen", icon: GraduationCap, roles: ["azubi", "meister"] },
+  { id: "maintenance", label: "Wartung", icon: RefreshCw, roles: ["azubi", "vorarbeiter", "monteur", "meister"] },
+  { id: "learning", label: "Lernen", icon: GraduationCap, roles: ["azubi", "meister", "buero"] },
   { id: "azubiPlan", label: "Azubi-Plan", icon: GraduationCap, roles: ["azubi", "meister"] },
   { id: "knowledge", label: "Skizzen", icon: Layers, roles: ["azubi", "vorarbeiter", "monteur", "meister"] },
   { id: "reportBook", label: "Berichtsheft", icon: BookOpen, roles: ["azubi", "meister"] },
   { id: "safety", label: "Warnsystem", icon: AlertTriangle, roles: ["azubi", "vorarbeiter", "monteur", "meister", "buero"] },
   { id: "norms", label: "Normen", icon: ShieldCheck, roles: ["azubi", "vorarbeiter", "monteur", "meister", "buero"] },
-  { id: "pdf", label: "PDF Export", icon: Download, roles: ["vorarbeiter", "monteur", "meister", "buero", "kunde"] },
-  { id: "offline", label: "Offline", icon: WifiOff, roles: ["azubi", "vorarbeiter", "monteur", "meister", "buero"] },
+  { id: "pdf", label: "PDF Export", icon: Download, roles: ["vorarbeiter", "monteur", "meister", "buero"] },
   { id: "rights", label: "Rechte", icon: Settings, roles: ["meister", "buero"] },
   { id: "company", label: "Firma & Team", icon: UserRound, roles: ["meister", "buero"] },
   { id: "planning", label: "Baustellenplanung", icon: BriefcaseBusiness, roles: ["meister", "buero", "vorarbeiter"] },
@@ -124,48 +141,7 @@ const navItems = [
   { id: "ki", label: "KI", icon: Sparkles, roles: ["azubi", "vorarbeiter", "monteur", "meister", "buero"] },
 ];
 
-const productTypes = [
-  { id: "vorbaurollladen", name: "Vorbaurollladen", category: "Rollladen", description: "Nachrüstung oder Renovierung. Kasten und Führung sitzen außen vor dem Fenster oder in der Laibung.", steps: ["Aufmaß prüfen", "Untergrund prüfen", "Kasten/Schienen ausrichten", "bohren und befestigen", "Panzerlauf prüfen", "Motor/Bedienung einstellen", "Übergabe dokumentieren"], tools: ["Maßband", "Laser", "Bohrmaschine", "Akkuschrauber", "Steinbohrer", "Nietzange", "Einstellkabel", "Multimeter"], risks: ["Revision verbaut", "Schienen nicht parallel", "Kabelauslass falsch", "WDVS falsch befestigt"] },
-  { id: "aufsatzrollladen", name: "Aufsatzrollladen", category: "Rollladen", description: "Kasten sitzt auf dem Fenster. Relevant bei Neubau oder Fenstertausch.", steps: ["Fenstermaß abstimmen", "Kasten mit Fenster verbinden", "Dichtung/Dämmung prüfen", "Führung montieren", "Funktion testen"], tools: ["Fensterbau-Werkzeug", "Montagekeile", "Laser", "Dichtband", "Akkuschrauber", "Multimeter"], risks: ["Luftdichtheit", "Revision nicht zugänglich", "Fenstermaß passt nicht"] },
-  { id: "markise", name: "Gelenkarm-/Kassettenmarkise", category: "Markise", description: "Terrassen- oder Balkonschutz mit hohen Kräften auf Konsolen und Untergrund.", steps: ["Montagehöhe und Ausfall prüfen", "Untergrund bewerten", "Konsolen anzeichnen", "Befestigung setzen", "Markise einhängen", "Neigung/Endlagen einstellen", "Windhinweis erklären"], tools: ["Bohrhammer", "Laser", "Drehmomentschlüssel", "Montagelift", "Injektionszubehör", "Steckschlüssel", "Sender"], risks: ["hohe Zugkräfte", "WDVS", "falsche Konsole", "Windklasse falsch verstanden"] },
-  { id: "raffstore", name: "Raffstore / Außenjalousie", category: "Außenjalousie", description: "Außenliegende Lamellenanlage für Sonnenschutz und Lichtlenkung.", steps: ["Blende/Kasten prüfen", "Führungen ausrichten", "Lamellenpaket einsetzen", "Wendung prüfen", "Windwächter testen"], tools: ["Laser", "Akkuschrauber", "Bohrmaschine", "Nietzange", "Seilschneider", "Einstellkabel"], risks: ["Lamellen verdreht", "Wendepunkt falsch", "Windgrenze unklar", "Führung locker"] },
-  { id: "zipscreen", name: "ZIP-Screen", category: "Textilscreen", description: "Textiler Sonnenschutz mit seitlicher ZIP-Führung.", steps: ["Öffnung prüfen", "Kasten setzen", "Schienen parallel montieren", "Tuchlauf prüfen", "Endlagen exakt einstellen"], tools: ["Laser", "Akkuschrauber", "Bohrmaschine", "Kunststoffkeile", "Sender", "weiche Bürste"], risks: ["Schienen schief", "Tuch verkantet", "Schmutz in ZIP-Führung"] },
-  { id: "insektenschutz", name: "Insektenschutz", category: "Zubehör", description: "Spannrahmen, Drehrahmen, Schiebeanlage oder Rollo gegen Insekten.", steps: ["lichte Maße prüfen", "Rahmen vorbereiten", "Bürsten einsetzen", "montieren", "Schließung/Lauf prüfen"], tools: ["Maßband", "Gehrungssäge", "Gummihammer", "Feile", "Akkuschrauber", "Cuttermesser"], risks: ["Rahmen verzogen", "Bürste zu stramm", "Griffposition nicht beachtet"] },
-  { id: "rolltor", name: "Rolltor / Rollgitter", category: "Tor", description: "Abschluss für Garage, Halle oder Gewerbe mit besonderem Sicherheitsbedarf.", steps: ["Öffnung prüfen", "Führungen/Welle montieren", "Panzer einsetzen", "Sicherheitseinrichtungen prüfen", "Notbedienung erklären"], tools: ["Bohrhammer", "Laser", "Montagelift", "Steckschlüssel", "Drehmomentschlüssel", "Multimeter", "Prüfprotokoll"], risks: ["Sicherheitseinrichtung fehlt", "Notentriegelung unklar", "Endlage falsch"] },
-];
 
-const checklistTemplates = {
-  vorbaurollladen: ["Auftrag und Maße geprüft", "Kabelauslass geklärt", "Untergrund geprüft", "Schienen parallel markiert", "Kasten befestigt", "Panzerlauf getestet", "Endlagen eingestellt", "Fotos gemacht", "Kunde eingewiesen"],
-  aufsatzrollladen: ["Fenstermaß abgestimmt", "Kastenverbindung geprüft", "Luftdichtheit/Dämmung geprüft", "Führungsschienen montiert", "Revision zugänglich", "Antrieb getestet", "Übergabe dokumentiert"],
-  markise: ["Untergrund bewertet", "Konsolenposition geprüft", "Befestigungssystem gewählt", "Bohrlöcher gereinigt", "Drehmoment geprüft", "Neigung eingestellt", "Windhinweis erklärt", "Protokoll erstellt"],
-  raffstore: ["Paketraum geprüft", "Führung montiert", "Lamellenlauf geprüft", "Wendung getestet", "Windwächter geprüft", "Kunde eingewiesen"],
-  zipscreen: ["Öffnung rechtwinklig geprüft", "Schienen parallel", "Tuchlauf sauber", "Endlagen exakt", "Schienenreinigung erklärt"],
-  insektenschutz: ["lichte Maße geprüft", "Rahmen rechtwinklig", "Bürsten angepasst", "Schließung/Lauf getestet", "Pflegehinweis gegeben"],
-  rolltor: ["Sicherheitsabstände geprüft", "Führungen befestigt", "Panzerlauf geprüft", "Sicherheitseinrichtungen getestet", "Notbedienung erklärt", "Wartungshinweis gegeben"],
-};
-const dynamicChecklistRules = [
-  { when: { substrate: "WDVS" }, items: ["Dämmstärke ermittelt", "Abstandsmontagesystem gewählt", "Lastabtragung in tragenden Untergrund geprüft", "Abdichtung dokumentiert"] },
-  { when: { drive: "Funkmotor" }, items: ["Senderkanal beschriftet", "Funkreichweite geprüft", "Gruppensteuerung erklärt", "Batteriehinweis gegeben"] },
-  { when: { drive: "Tastermotor" }, items: ["Tasterposition geprüft", "Drehrichtung geprüft", "Anschluss dokumentiert", "Bedienung erklärt"] },
-  { when: { installType: "Renovierung" }, items: ["Altanlage demontiert", "Entsorgung geklärt", "Bestandsschäden dokumentiert"] },
-  { when: { windCritical: true }, items: ["Windlage bewertet", "Windklasse/Herstellerangabe geprüft", "Kundenhinweis Wind dokumentiert", "Sensorik geprüft"] },
-];
-const measurementRequiredFields = {
-  vorbaurollladen: ["Breite", "Höhe", "Kastenform", "Führungsschiene", "Bedienseite", "Motorseite", "Revision", "Kabelauslass", "Untergrund", "Farbe", "Fensterfoto"],
-  markise: ["Breite", "Ausfall", "Montagehöhe", "Neigung", "Untergrund", "Konsolenposition", "Windlage", "Stromanschluss", "Tuchfarbe", "Montagefoto"],
-  raffstore: ["Breite", "Höhe", "Paketraum", "Führung", "Lamellentyp", "Bedienung", "Windwächter", "Fassadenlage", "Foto"],
-  zipscreen: ["Breite", "Höhe", "Schienenmaß", "Kastenmaß", "Tuchfarbe", "Motorseite", "Untergrund", "Rechtwinkligkeit", "Foto"],
-  insektenschutz: ["lichte Breite", "lichte Höhe", "Rahmentyp", "Griffposition", "Bürstenhöhe", "Farbe", "Foto"],
-  rolltor: ["lichte Breite", "lichte Höhe", "Sturzhöhe", "Seitenplatz", "Strom", "Sicherheitseinrichtung", "Notbedienung", "Foto"],
-};
-const qualityRequirements = [
-  { id: "checklist", label: "Produkt-Checkliste vollständig", type: "checklist" },
-  { id: "photos", label: "Vorher-, Nachher- und Typenschildfoto vorhanden", type: "photos" },
-  { id: "customer", label: "Kunde eingewiesen", type: "manual" },
-  { id: "motor", label: "Motor/Bedienung getestet", type: "manual" },
-  { id: "protocol", label: "Protokoll/Notizen ausgefüllt", type: "notes" },
-  { id: "pdf", label: "PDF/Export vorbereitet", type: "manual" },
-];
 
 const pdfTemplateDefinitions = {
   "Montageprotokoll": {
@@ -255,65 +231,6 @@ const pdfTemplateDefinitions = {
   },
 };
 
-const toolKits = [
-  { group: "Messen & Anzeichnen", items: ["Maßband", "Gliedermaßstab", "Laser-Entfernungsmesser", "Kreuzlinienlaser", "Wasserwaage", "Schlagschnur", "Winkel", "Schieblehre"] },
-  { group: "Bohren & Befestigen", items: ["Akkuschrauber", "Bohrmaschine", "Bohrhammer", "Steinbohrer", "Betonbohrer", "Metallbohrer", "Holzbohrer", "Bit-Satz", "Drehmomentschlüssel", "Bohrlochbürste", "Ausbläser"] },
-  { group: "Elektro & Motor", items: ["Spannungsprüfer", "Multimeter", "Einstellkabel", "Prüfkabel", "Abisolierzange", "Aderendhülsenzange", "Klemmen", "Handsender", "Ersatzbatterien"] },
-  { group: "Montage & Zuschnitt", items: ["Nietzange", "Blechschere", "Feile", "Entgrater", "Cuttermesser", "Metallsäge", "Gehrungssäge", "Gummihammer", "Montagekissen", "Montagelift"] },
-  { group: "Abdichten & Reinigen", items: ["Kartuschenpistole", "Silikon", "MS-Polymer", "Dichtband", "Isopropanol", "weiche Bürste", "Staubsauger", "Lappen"] },
-  { group: "Sicherheit", items: ["PSA", "Handschuhe", "Schutzbrille", "Gehörschutz", "Leiter", "Gerüst", "Absperrband", "Leitungssucher", "Erste-Hilfe-Set"] },
-];
-const substrates = [
-  { name: "Beton", tools: ["Bohrhammer", "SDS-Bohrer", "Bohrlochbürste", "Ausbläser", "Drehmomentschlüssel"], fasteners: ["Schwerlastanker", "Betonschraube", "Injektionsanker"], warning: "Randabstände und Bohrlochreinigung beachten." },
-  { name: "Vollstein", tools: ["Steinbohrer", "Bohrmaschine", "Drehmomentschlüssel"], fasteners: ["Rahmendübel", "Langschaftdübel", "Injektionsanker"], warning: "Altbau kann wechselnde Festigkeit haben." },
-  { name: "Lochstein", tools: ["Bohrmaschine ohne Schlag", "Ziegelbohrer", "Siebhülse", "Injektionspistole"], fasteners: ["Injektionssystem", "Spezialdübel"], warning: "Normale Dübel können ausreißen." },
-  { name: "Porenbeton", tools: ["Bohrmaschine ohne Schlag", "Porenbetonbohrer", "Spezialsetzwerkzeug"], fasteners: ["Porenbetondübel", "Spezialanker"], warning: "Für schwere Markisen kritisch prüfen." },
-  { name: "WDVS", tools: ["langer Bohrer", "Abstandsmontagesystem", "Injektionszubehör", "Dichtmittel"], fasteners: ["zugelassenes Abstandsmontagesystem", "Thermotrennelement"], warning: "Lasten nicht in Dämmung, sondern in tragenden Untergrund ableiten." },
-  { name: "Holz", tools: ["Holzbohrer", "Akkuschrauber", "Vorbohrer", "Korrosionsschutz-Schrauben"], fasteners: ["Holzschrauben", "Schlüsselschrauben", "Gegenplatte"], warning: "Tragende Stärke prüfen, Verkleidung reicht nicht." },
-  { name: "Stahl", tools: ["Metallbohrer", "Körner", "Schneidöl", "Gewindeschneider"], fasteners: ["Maschinenschraube", "Gewindebolzen", "Klemmkonsole"], warning: "Statik und Korrosionsschutz beachten." },
-];
-const motorTypes = [
-  { name: "Mechanischer Rohrmotor", details: "Endlagen werden mit Einstellschrauben oder Einstelltasten gesetzt.", checks: ["Drehrichtung", "untere Endlage", "obere Endlage", "Probefahrten", "Dokumentation"], mistakes: ["Endlage zu hoch", "falscher Adapter", "Taster vertauscht"] },
-  { name: "Elektronischer Rohrmotor", details: "Endlagen werden elektronisch, automatisch oder per Einstellkabel gesetzt.", checks: ["Modell bestimmen", "Lernfahrt", "Hinderniserkennung", "Festfrierschutz", "Speicherung"], mistakes: ["falsche Lernsequenz", "schwergängiger Panzer", "Endlage nicht gespeichert"] },
-  { name: "Funkmotor", details: "Motor mit internem oder externem Empfänger für Handsender, Wandsender oder Smart Home.", checks: ["einzeln Spannung geben", "Kanal wählen", "Sender koppeln", "Endlagen", "Reichweite"], mistakes: ["mehrere Motoren gekoppelt", "falscher Kanal", "Batterie schwach"] },
-  { name: "Solarmotor", details: "Akku-Motor mit Solarpanel, oft bei Nachrüstung ohne Zuleitung.", checks: ["Akkustand", "Panelposition", "Stecker", "Endlagen", "Winterhinweis"], mistakes: ["Panel verschattet", "Akku leer", "Steckverbindung lose"] },
-  { name: "Steuerungen & Sensorik", details: "Taster, Zentralsteuerung, Wind-Sonnen-Sensor, Zeitschaltuhr und Smart Home.", checks: ["Nutzerwunsch", "Sensorposition", "Fahrzeiten", "Prioritäten", "Kundeneinweisung"], mistakes: ["Sensor falsch montiert", "Windgrenze zu hoch", "Automatik nicht erklärt"] },
-];
-const manufacturers = [
-  { name: "Somfy", protocols: ["RTS", "io"], topics: ["Sender einlernen", "Endlagen", "Reset", "Smart Home"], note: "Modell genau bestimmen, weil Tastfolgen stark variieren." },
-  { name: "Becker", protocols: ["Centronic", "B-Tronic"], topics: ["Rohrmotor", "Funk", "Hinderniserkennung", "Endlagen"], note: "Motortyp und Serie vor Einstellung prüfen." },
-  { name: "Selve", protocols: ["commeo", "iveo"], topics: ["Funk", "Gruppensteuerung", "Reset", "Sensorik"], note: "Bei Mehrfachanlagen einzeln programmieren." },
-  { name: "Elero", protocols: ["ProLine", "Combio"], topics: ["Funkempfänger", "Endlagen", "Sensorik", "Handsender"], note: "Drehrichtung und Endlagen mehrfach testen." },
-  { name: "Cherubini", protocols: ["CRC", "Funk/Kabel"], topics: ["Rohrmotor", "Sender", "Reset", "Programmierung"], note: "Serie und Senderkompatibilität prüfen." },
-  { name: "Warema / Roma / Alulux", protocols: ["Systemabhängig"], topics: ["Rollladen", "Raffstore", "Steuerung", "Systemkomponenten"], note: "Systemdatenblatt und Montageanleitung verwenden." },
-];
-const diagnosisTrees = [
-  { id: "motor-faehrt-nicht", title: "Motor fährt nicht", category: "Motor / Elektro", tools: ["Spannungsprüfer", "Multimeter", "Sender", "Einstellkabel"], firstSteps: ["Anlage nicht weiter belasten", "Sichtprüfung", "Motortyp feststellen"], start: { q: "Brummt der Motor?", yes: "Mechanische Blockade, schwergängiger Panzer oder defekter Motor möglich. Laufweg, Welle, Lager und Endlagen prüfen.", no: "Stromversorgung, Sicherung, Taster, Sender, Empfänger und Klemmen prüfen." } },
-  { id: "motor-brummt", title: "Motor brummt, bewegt aber nicht", category: "Motor / Mechanik", tools: ["Spannungsprüfer", "Schraubendreher", "Einstellkabel"], firstSteps: ["Sofort stoppen", "Blockade ausschließen", "Panzer entlasten"], start: { q: "Lässt sich der Panzer mechanisch frei bewegen?", yes: "Motor, Kondensator, Bremse, Adapter oder Endlage prüfen.", no: "Blockade in Führung, Panzer, Endstab, Welle oder Aufhängung suchen." } },
-  { id: "rollladen-schief", title: "Rollladen läuft schief", category: "Rollladen", tools: ["Laser", "Wasserwaage", "Akkuschrauber"], firstSteps: ["Lauf stoppen", "Führung prüfen", "Panzer prüfen"], start: { q: "Sind Führungsschienen parallel und frei?", yes: "Panzer, Lamellen, Aufhängungen, Welle und Lager prüfen.", no: "Schienen reinigen, neu ausrichten und Abstand oben/unten vergleichen." } },
-  { id: "funk-reagiert-nicht", title: "Funk reagiert nicht", category: "Funk / Steuerung", tools: ["Ersatzbatterie", "Handsender", "Spannungsprüfer"], firstSteps: ["Batterie prüfen", "Kanal prüfen", "Reichweite prüfen"], start: { q: "Reagiert ein anderer Sender oder Kanal?", yes: "Problem liegt wahrscheinlich am einzelnen Sender, Kanal oder der Batterie.", no: "Empfänger/Motor mit Spannung versorgen, Reichweite prüfen und Einlernen kontrollieren." } },
-  { id: "markise-stoppt", title: "Markise stoppt früh", category: "Markise", tools: ["Sender", "Einstellkabel", "Multimeter"], firstSteps: ["Hindernis prüfen", "Windautomatik prüfen", "Gelenkarme prüfen"], start: { q: "Ist Windautomatik oder Hindernis aktiv?", yes: "Windwächter, Hindernis, Gelenkarme und Sensorstatus prüfen.", no: "Endlagen, Motorschutz, Tuchwicklung und Schwergängigkeit prüfen." } },
-  { id: "zipscreen-klemmt", title: "ZIP-Screen klemmt oder läuft schief", category: "ZIP-Screen", tools: ["Laser", "weiche Bürste", "Akkuschrauber"], firstSteps: ["Schienen reinigen", "Parallelität prüfen", "Tuchführung prüfen"], start: { q: "Sind die Seitenschienen sauber und parallel?", yes: "Tuchführung, ZIP-Keder, Endlagen und Tuchspannung prüfen.", no: "Schienen reinigen und neu ausrichten. Danach langsame Probefahrt." } },
-  { id: "raffstore-wendet-falsch", title: "Raffstore wendet falsch", category: "Raffstore", tools: ["Sender", "Einstellkabel", "Laser"], firstSteps: ["Drehrichtung prüfen", "Wendepunkt prüfen", "Lamellen prüfen"], start: { q: "Stimmt die Drehrichtung?", yes: "Wendepunkt, Aufzugsbänder, Lamellenpaket und Steuerung prüfen.", no: "Drehrichtung nach Herstellerangabe korrigieren." } },
-  { id: "sensorik-falsch", title: "Wind-/Sonnensensor reagiert falsch", category: "Sensorik", tools: ["Sender", "Herstelleranleitung", "Leiter"], firstSteps: ["Sensorposition prüfen", "Sensor reinigen", "Grenzwerte prüfen"], start: { q: "Ist der Sensor richtig positioniert und sauber?", yes: "Grenzwerte, Funkverbindung, Batterien und Automatikmodus prüfen.", no: "Sensor reinigen, ausrichten oder Montageort ändern." } },
-];
-const partCatalog = [
-  { group: "Rollladen", product: "Rollladen", name: "Gurtwickler", asks: ["Gurtbreite", "Aufputz/Einlass", "Lochabstand", "Farbe"], tip: "Federkraft prüfen und Gurt nicht verdrehen." },
-  { group: "Rollladen", product: "Rollladen", name: "Gurtscheibe", asks: ["Welle", "Gurtbreite", "Durchmesser", "Lagerseite"], tip: "Passend zur Welle und zum Gurt wählen." },
-  { group: "Rollladen", product: "Rollladen", name: "Rollladenwelle SW40/SW60", asks: ["Länge", "Wellentyp", "Lager", "Motor/Gurt"], tip: "Welle gerade zuschneiden und entgraten." },
-  { group: "Motor", product: "Motor", name: "Rohrmotor", asks: ["Nm", "Welle", "Länge", "Funk/Kabel", "Endlagenart"], tip: "Drehmoment anhand Panzergewicht/Größe prüfen." },
-  { group: "Motor", product: "Motor", name: "Motoradapter / Mitnehmer", asks: ["Motormarke", "Wellentyp", "Serie"], tip: "Falscher Adapter verursacht Spiel oder Blockade." },
-  { group: "Markise", product: "Markise", name: "Markisentuch", asks: ["Breite", "Ausfall", "Tuchnummer", "Volant"], tip: "Wickelrichtung und Tuchspannung dokumentieren." },
-  { group: "Markise", product: "Markise", name: "Gelenkarm", asks: ["Hersteller", "Ausfall", "Seite", "Armtyp"], tip: "Federgespannte Arme nur gesichert bearbeiten." },
-  { group: "Raffstore", product: "Raffstore", name: "Aufzugsband", asks: ["Breite", "Länge", "Hersteller", "Lamellentyp"], tip: "Bänder nicht verdrehen." },
-  { group: "Insektenschutz", product: "Insektenschutz", name: "Bürstendichtung", asks: ["Nutmaß", "Bürstenhöhe", "Farbe"], tip: "Dicht, aber nicht bremsend einsetzen." },
-];
-const maintenanceTips = [
-  { product: "Rollladen", title: "Führungsschienen reinigen", steps: ["Laub und Sand entfernen", "mit weicher Bürste ausfegen", "feucht nachwischen", "kein Öl einbringen", "Probelauf machen"] },
-  { product: "Markise", title: "Tuch pflegen", steps: ["trocken abbürsten", "milden Reiniger nutzen", "vollständig trocknen lassen", "bei Wind einfahren"] },
-  { product: "Raffstore", title: "Lamellen prüfen", steps: ["Lamellen optisch prüfen", "Bänder auf Verdrehung prüfen", "Führungen nachziehen", "Windwächter testen"] },
-  { product: "ZIP-Screen", title: "ZIP-Führung sauber halten", steps: ["Schienen ausbürsten", "Tuchlauf langsam testen", "Schiefstand prüfen", "keine Gewalt anwenden"] },
-];
 const customerTemplates = [
   { title: "Terminbestätigung", text: "Hallo {kunde}, wir bestätigen den Montagetermin für {produkt}. Termin: {termin}. Adresse: {adresse}. Bitte sorgen Sie dafür, dass der Montagebereich frei zugänglich ist." },
   { title: "Montagevorbereitung", text: "Hallo {kunde}, bitte räumen Sie den Bereich für {produkt} vor dem Termin frei. Termin: {termin}." },
@@ -321,41 +238,6 @@ const customerTemplates = [
   { title: "Pflegehinweis Rollladen", text: "Bitte halten Sie die Führungsschienen sauber. Laub, Sand und Schmutz mit einer weichen Bürste entfernen. Keine öligen oder aggressiven Mittel verwenden." },
   { title: "Reklamation", text: "Bitte senden Sie uns ein Foto oder kurzes Video der Situation sowie eine kurze Fehlerbeschreibung. Wir prüfen den Fall und melden uns mit einer Einschätzung." },
   { title: "Bewertung anfragen", text: "Vielen Dank für Ihren Auftrag. Wenn Sie mit unserer Arbeit zufrieden sind, freuen wir uns sehr über eine kurze Bewertung." },
-];
-const norms = [
-  { title: "DIN EN 13659", text: "Außenabschlüsse und Außenjalousien, z. B. Rollläden und Raffstores. In der App als Orientierung zu Sicherheit und Windwiderstand führen." },
-  { title: "DIN EN 13561", text: "Markisen. Relevant für Leistungs- und Sicherheitsanforderungen sowie Windwiderstandsklassen." },
-  { title: "Windklassen", text: "Windklasse ist keine pauschale Freigabe. Produktgröße, Untergrund, Befestigung, Gebäudehöhe, Lage und Herstellerangaben sind entscheidend." },
-  { title: "Herstelleranleitung", text: "Immer verbindlich für Montage, Anschluss, Einstellung, Wartung und Produktgrenzen." },
-];
-const reportActivityTemplates = [
-  { id: "montage", label: "Montage", text: "Ich habe bei der Montage einer Sonnenschutzanlage mitgearbeitet. Dabei wurden Maße geprüft, Bauteile vorbereitet, Führungselemente ausgerichtet, Befestigungspunkte gesetzt und die Funktion der Anlage kontrolliert." },
-  { id: "aufmass", label: "Aufmaß", text: "Ich habe ein Aufmaß vorbereitet beziehungsweise unterstützt. Dabei wurden Breite, Höhe, Einbausituation, Bedienseite, Untergrund, Stromanschluss und Besonderheiten dokumentiert." },
-  { id: "wartung", label: "Wartung", text: "Ich habe Wartungs- und Pflegearbeiten durchgeführt. Dabei wurden Führungsschienen gereinigt, bewegliche Bauteile geprüft, die Funktion getestet und Kundenhinweise vorbereitet." },
-  { id: "diagnose", label: "Fehlerdiagnose", text: "Ich habe bei der Fehlersuche unterstützt. Das Fehlerbild wurde aufgenommen, mögliche Ursachen wurden systematisch geprüft und die Ergebnisse wurden dokumentiert." },
-  { id: "motor", label: "Motor & Steuerung", text: "Ich habe Arbeiten an Antrieb und Steuerung begleitet. Dabei wurden Motortyp, Bedienart, Laufrichtung, Endlagen und die Funktion der Steuerung geprüft." },
-];
-const reportLearningFields = ["Montage und Instandhaltung", "Aufmaß und Planung", "Antriebe und Steuerungen", "Fehlerdiagnose und Wartung", "Kundenkommunikation", "Arbeitssicherheit", "Dokumentation und Qualitätssicherung"];
-const reportTechnicalTerms = {
-  "1": ["Aufmaß", "Führungsschiene", "Rollladenpanzer", "Montagebereich", "Werkzeugauswahl", "Arbeitssicherheit"],
-  "2": ["Rohrmotor", "Endlage", "Untergrundprüfung", "Befestigungspunkt", "Funktionsprüfung", "Kundenübergabe"],
-  "3": ["Steuerung", "Sensorik", "Windwiderstand", "Fehlerdiagnose", "Dokumentation", "Qualitätssicherung"],
-};
-const quizCards = [
-  { y: 1, t: "Grundlagen", q: "Warum müssen Führungsschienen parallel sein?", options: ["Freier Lauf ohne Klemmen", "schnellerer Motor", "mehr Farbe"], correctIndex: 0, explanation: "Parallele Schienen verhindern Reibung und Schieflauf." },
-  { y: 1, t: "Grundlagen", q: "Was ist eine Endlage?", options: ["Kastenfarbe", "Motor-Abschaltpunkt oben/unten", "Schraubentyp"], correctIndex: 1, explanation: "Endlagen begrenzen die Fahrbewegung." },
-  { y: 1, t: "Werkzeug", q: "Warum Bohrloch reinigen?", options: ["Optik", "weniger Lärm", "bessere Haltekraft"], correctIndex: 2, explanation: "Staub schwächt Dübel und Injektionsanker." },
-  { y: 1, t: "Sicherheit", q: "Was bedeutet Revision?", options: ["Zugang für Wartung", "Lamellenfarbe", "Rabatt"], correctIndex: 0, explanation: "Bauteile müssen erreichbar bleiben." },
-  { y: 1, t: "Untergrund", q: "Was ist bei WDVS wichtig?", options: ["in Dämmung schrauben", "Last in tragenden Untergrund", "nur kleben"], correctIndex: 1, explanation: "Dämmung trägt keine schweren Lasten." },
-  { y: 2, t: "Motor", q: "Was vor Motor-Einstellung klären?", options: ["Motortyp/Hersteller", "Fensterfarbe", "Kundenalter"], correctIndex: 0, explanation: "Einstelllogik hängt vom Motortyp ab." },
-  { y: 2, t: "Motor", q: "Warum nur einen Funkmotor bestromen?", options: ["falsches Einlernen vermeiden", "mehr Licht", "weniger Werkzeug"], correctIndex: 0, explanation: "Sonst koppeln mehrere Motoren falsch." },
-  { y: 3, t: "Normen", q: "Windklasse bedeutet ...", options: ["Orientierung, keine pauschale Freigabe", "immer egal", "nur innen"], correctIndex: 0, explanation: "Einbausituation bleibt entscheidend." },
-];
-const sketchCards = [
-  { title: "Aufbau Rollladen", parts: ["Kasten", "Welle", "Lager", "Panzer", "Endstab", "Führungsschiene", "Bedienung/Motor"], tip: "Beim Lernen von oben nach unten denken: Kasten → Welle → Panzer → Führung → Bedienung." },
-  { title: "Rohrmotor in der Welle", parts: ["Motorkopf", "Adapter", "Mitnehmer", "Achtkantwelle", "Lager", "Endlagen"], tip: "Adapter und Mitnehmer müssen zur Welle und zum Motor passen." },
-  { title: "Markise", parts: ["Konsolen", "Tragrohr", "Tuchwelle", "Gelenkarme", "Ausfallprofil", "Motor", "Sensorik"], tip: "Konsolen nehmen hohe Kräfte auf. Untergrund immer ernst nehmen." },
-  { title: "WDVS-Abstandsmontage", parts: ["Putz", "Dämmstoff", "tragender Untergrund", "Abstandssystem", "Dichtung", "Konsole"], tip: "Lasten gehören in den tragenden Untergrund, nicht in den Dämmstoff." },
 ];
 const techStacks = {
   supabase: { name: "Supabase", frontend: "React / React Native", auth: "Supabase Auth", database: "PostgreSQL", storage: "Supabase Storage", realtime: "Realtime Channels", offline: "lokale DB + Sync Queue", bestFor: "Handwerker-App mit Rollen, Aufträgen, Berichten, Fotos und späterem Web-Dashboard.", nextSteps: ["Supabase-Projekt anlegen", "Tabellen erstellen", "RLS-Regeln aktivieren", "Storage-Bucket für Fotos erstellen", "App mit API-Keys verbinden", "Sync-Logik testen"] },
@@ -390,48 +272,12 @@ const orderWorkflowTemplates = [
   { id: "reklamation", name: "Reklamation", product: "zipscreen", orderType: "Reklamation", notes: "Kundenmeldung prüfen, Schaden dokumentieren, Ursache bewerten, Nacharbeit oder Ersatzteil anlegen." },
 ];
 
-const roleHomeConfig = {
-  dev: { title: "Dev-Systemübersicht", subtitle: "Alle Rollen, Module, Sync-Status und Testdaten im Blick.", focus: ["Alle Rollen testen", "Supabase-Sync prüfen", "PDF-Export testen", "Team-Codes kontrollieren"] },
-  meister: { title: "Betriebsübersicht", subtitle: "Aufträge, Team, Qualität, Berichte und Kundenkommunikation steuern.", focus: ["Offene Aufträge priorisieren", "Team einteilen", "Berichte freigeben", "Abschlüsse prüfen"] },
-  buero: { title: "Büro-Cockpit", subtitle: "Termine, Kunden, Angebote, PDFs und Auftragsdaten vorbereiten.", focus: ["Kundendaten pflegen", "PDFs vorbereiten", "Termine kontrollieren", "Angebote erstellen"] },
-  vorarbeiter: { title: "Kolonnenübersicht", subtitle: "Eigene Baustellen, Teamfortschritt, Fotos und Abschlussprüfung.", focus: ["Tagesplan prüfen", "Team zuweisen", "Fotos kontrollieren", "Abschluss vorbereiten"] },
-  monteur: { title: "Monteur-Start", subtitle: "Zugewiesene Baustellen, Checklisten, Fotos und Diagnose direkt starten.", focus: ["Nächste Baustelle öffnen", "Checkliste abhaken", "Fotos ergänzen", "Auftrag abschließen"] },
-  azubi: { title: "Azubi-Start", subtitle: "Berichtsheft, Lernfortschritt, Quiz und zugewiesene Baustellen.", focus: ["Tagesbericht schreiben", "Quiz wiederholen", "Meister-Kommentar prüfen", "Baustellen lernen"] },
-  kunde: { title: "Kundenportal", subtitle: "Eigene Termine, Auftragsstatus, Pflegehinweise und Dokumente.", focus: ["Termin prüfen", "Auftragsstatus ansehen", "Pflegehinweis lesen", "Dokumente herunterladen"] },
-};
 
-const azubiLearningModules = [
-  { topic: "Rollladenmontage", year: "1", goal: "Bauteile erkennen, Führungsschienen ausrichten, einfache Montageabläufe erklären.", tasks: ["Skizze Rollladen ansehen", "5 Quizfragen Grundlagen", "Berichtssatz zur Montage schreiben"] },
-  { topic: "Aufmaß", year: "1", goal: "Breite, Höhe, Einbausituation und Bedienseite sauber dokumentieren.", tasks: ["Aufmaßblatt ausfüllen", "Pflichtfelder prüfen", "Foto-Notiz ergänzen"] },
-  { topic: "Motoren & Endlagen", year: "2", goal: "Motortyp erkennen, Laufrichtung prüfen und Endlagen erklären.", tasks: ["Motoren-Bereich lesen", "Quiz Motor wiederholen", "Prüfschritte im Bericht verwenden"] },
-  { topic: "Fehlerdiagnose", year: "2", goal: "Fehlerbild aufnehmen und systematisch erste Prüfschritte ableiten.", tasks: ["Diagnose Schrittmodus nutzen", "mögliche Ursache notieren", "Protokolltext erzeugen"] },
-  { topic: "Kundenkommunikation", year: "3", goal: "Übergabe, Pflegehinweise und Bedenken verständlich formulieren.", tasks: ["Kundentext kopieren", "Pflegehinweis erklären", "Übergabe im Bericht dokumentieren"] },
-  { topic: "Qualität & Abschluss", year: "3", goal: "Checkliste, Fotos, Protokoll und Kundeneinweisung vor Abschluss prüfen.", tasks: ["Abschlussprüfung öffnen", "fehlende Punkte lösen", "PDF-Vorschau prüfen"] },
-];
 
-const customerPortalActions = [
-  "Termin bestätigen",
-  "Terminverschiebung anfragen",
-  "Pflegehinweise ansehen",
-  "Reklamation melden",
-  "Dokumente/PDFs prüfen",
-  "Bewertung vorbereiten",
-];
-
-const teamRoleOptions = [
-  { id: "vorarbeiter", label: "Vorarbeiter", prefix: "VOR", description: "Sieht eigene Kolonne, Team-Baustellen und kann Fortschritt prüfen." },
-  { id: "monteur", label: "Monteur", prefix: "MON", description: "Sieht zugewiesene Baustellen, Checklisten, Fotos, Diagnose und Abschluss." },
-  { id: "azubi", label: "Azubi", prefix: "AZU", description: "Sieht Lernen, Berichtsheft und zugewiesene Baustellen als Unterstützung." },
-  { id: "kunde", label: "Kunde", prefix: "KUN", description: "Sieht nur eigene Termine, Pflegehinweise und eigene Aufträge." },
-];
 const makeCode = (prefix = "APP") => `${prefix}-${Math.random().toString(36).slice(2, 7).toUpperCase()}`;
 const defaultCompany = () => ({
   id: "betrieb-muster",
   name: "Muster Sonnenschutz GmbH",
-  adminCode: makeCode("ADM"),
-  azubiCode: makeCode("AZU"),
-  customerCode: makeCode("KUN"),
-  monteurCode: makeCode("MON"),
   createdAt: new Date().toLocaleString("de-DE"),
 });
 const defaultCompanyPeople = () => [
@@ -442,196 +288,34 @@ const defaultCompanyPeople = () => [
 ];
 
 
-const additionalProductTypes = [
-  { id: "pergola", name: "Pergola-Markise", category: "Markise", description: "Geführte Sonnenschutzanlage mit Pfosten, Führung und hohem Anspruch an Ausrichtung, Wasserablauf und Windhinweise.", steps: ["Aufstellfläche und Gefälle prüfen", "Fundamente/Platten prüfen", "Führungen ausrichten", "Tuchlauf testen", "Sensorik erklären", "Wasserablauf dokumentieren"], tools: ["Laser", "Bohrhammer", "Drehmomentschlüssel", "Montagelift", "Steckschlüssel", "Einstellkabel"], risks: ["Fundament unklar", "Wasserablauf", "Windbelastung", "Schiefstand"] },
-  { id: "terrassendach", name: "Terrassendach-Beschattung", category: "Sonnenschutz", description: "Innen- oder außenliegende Beschattung für Glasdächer mit besonderer Prüfung von Führung, Neigung und Stromzuführung.", steps: ["Dachmaß prüfen", "Führungssystem wählen", "Kabelweg klären", "Tuchspannung prüfen", "Endlagen einstellen"], tools: ["Laser", "Leiter/Gerüst", "Akkuschrauber", "Einstellkabel", "Schutzmatten"], risks: ["Glasbruch", "Zugang schwierig", "Hitzeentwicklung", "Kabelweg"] },
-  { id: "screen_offen", name: "Offener Textilscreen", category: "Textilscreen", description: "Textiler Sonnenschutz ohne ZIP, stärker abhängig von Wind, Tuchspannung und sauberer Führung.", steps: ["Öffnung prüfen", "Kasten/Führung ausrichten", "Tuchwelle prüfen", "Endlagen einstellen", "Windhinweis erklären"], tools: ["Laser", "Akkuschrauber", "Sender", "weiche Bürste"], risks: ["Tuch flattert", "Windgrenze", "Schienen schief"] },
-  { id: "garagentor_antrieb", name: "Garagentor-Antrieb", category: "Tor", description: "Nachrüstung oder Service an Torantrieben mit Fokus auf Kraftabschaltung, Notentriegelung und Sicherheitsprüfung.", steps: ["Tor mechanisch prüfen", "Laufschiene montieren", "Kraft lernen", "Sicherheitsabschaltung testen", "Notentriegelung erklären"], tools: ["Akkuschrauber", "Bohrmaschine", "Leiter", "Multimeter", "Prüfprotokoll"], risks: ["Tor schwergängig", "Kraft zu hoch", "Notentriegelung unklar"] },
-];
-const allProductTypes = [...productTypes, ...additionalProductTypes];
 
-const extraToolKits = [
-  { group: "Service & Wartung", items: ["Silikonspray nur wenn freigegeben", "Tuchreiniger mild", "Ersatzbürsten", "Kleinbesen", "Mikrofasertücher", "Protokollvorlage", "Fotoliste"] },
-  { group: "Schwerlast Markise", items: ["Injektionsmörtel", "Siebhülsen", "Gewindestangen", "Drehmomentschlüssel", "Druckluft/Ausbläser", "Bohrlochbürsten", "Montagelift"] },
-  { group: "Kundenübergabe", items: ["Bedienungsanleitung", "Pflegekarte", "Windhinweis", "Senderbeschriftung", "QR-Code Platzhalter", "Unterschriftsprotokoll"] },
-  { group: "Dokumentation", items: ["Vorher-Foto", "Nachher-Foto", "Typenschildfoto", "Befestigungsfoto", "Aufmaßfoto", "Mängelfoto"] },
-];
-const allToolKits = [...toolKits, ...extraToolKits];
 
-const extraSubstrates = [
-  { name: "Klinker / Verblendmauerwerk", tools: ["Steinbohrer", "Abstandsmontage", "Bohrlochbürste", "Ausbläser"], fasteners: ["Langschaftdübel", "Injektionsanker nach Prüfung", "Distanzhülse"], warning: "Nicht nur in die dünne Vormauerschale planen, Lastweg und Hintermauerung prüfen." },
-  { name: "Naturstein", tools: ["geeigneter Steinbohrer", "Klebeband zum Anzeichnen", "Drehmomentschlüssel"], fasteners: ["Spezialanker", "Injektionsanker", "Schonunterlage"], warning: "Bruch- und Rissgefahr; Randabstände sehr sorgfältig prüfen." },
-  { name: "Altbau Mischmauerwerk", tools: ["Probebohrer", "Endoskop optional", "Injektionszubehör"], fasteners: ["Injektionssystem", "lange Befestigung", "Gegenplatte nach Prüfung"], warning: "Untergrund kann innerhalb weniger Zentimeter wechseln. Probezug/Herstellerangaben beachten." },
-  { name: "Kunststoff-/Fensterrahmen", tools: ["Vorbohrer", "Drehmoment begrenzen", "Schutzunterlage"], fasteners: ["Rahmenschraube nur nach Freigabe", "Klemm-/Systemlösung"], warning: "Nicht jede Last darf in den Rahmen. Fensterhersteller und Systemfreigabe beachten." },
-];
-const allSubstrates = [...substrates, ...extraSubstrates];
 
-const extraMotorTypes = [
-  { name: "Tastermotor / Kabelmotor", details: "Klassischer Motor mit Auf/Ab-Leitung über Schalter, Relais oder Steuerung.", checks: ["Schalter verriegelt", "N-Leiter vorhanden", "Auf/Ab richtig", "Endlagen", "Zugentlastung"], mistakes: ["Auf/Ab vertauscht", "Dauerstrom falsch", "keine Verriegelung"] },
-  { name: "Externer Funkempfänger", details: "Empfänger sitzt außerhalb des Motors, z. B. in Dose, Kasten oder Steuergerät.", checks: ["Versorgung", "Ausgang Auf/Ab", "Kanal", "Antenne", "Einbauort"], mistakes: ["Empfänger ohne Neutralleiter", "Antenne abgeschirmt", "falscher Modus"] },
-  { name: "Smart-Home Gateway", details: "Gateway verbindet Sonnenschutz mit App, Szenen und Automationen.", checks: ["WLAN/Netzwerk", "Gateway online", "Gerätezuordnung", "Szenen", "Kundenzugriff"], mistakes: ["falsches Konto", "2,4/5 GHz Problem", "Automatik nicht erklärt"] },
-  { name: "Wind-/Sonnensensor", details: "Sensoren schützen Anlagen und steuern Komfortfunktionen, ersetzen aber keine Einweisung.", checks: ["Montageort", "Batterie/Versorgung", "Grenzwert", "Funkreichweite", "Testfahrt"], mistakes: ["im Windschatten", "Grenzwert zu hoch", "Vorranglogik unbekannt"] },
-  { name: "Rolltor-Steuerung", details: "Torsteuerung mit Sicherheitsleisten, Lichtschranke, Notbedienung und Kraft-/Endlagenprüfung.", checks: ["Sicherheitsleiste", "Lichtschranke", "Notentriegelung", "Endlagen", "Warnhinweis"], mistakes: ["Sicherheit überbrückt", "Notbedienung nicht erklärt", "Kraft zu hoch"] },
-];
-const allMotorTypes = [...motorTypes, ...extraMotorTypes];
 
-const extraManufacturers = [
-  { name: "Roma", protocols: ["Systemabhängig", "Funk je Motor"], topics: ["Vorbaurollladen", "ZIP-Screen", "Raffstore", "Bestellmaße"], note: "System- und Kastenvariante sauber erfassen; Typenschildfoto immer speichern." },
-  { name: "Warema", protocols: ["WMS", "EWFS", "Systemsteuerung"], topics: ["Raffstore", "Markise", "Sensorik", "Wind"], note: "Bei Sensorik und Steuerungen unbedingt Systemfamilie prüfen." },
-  { name: "Alulux", protocols: ["Systemabhängig"], topics: ["Rollladen", "Garage", "Kasten", "Führung"], note: "Profil, Kasten und Führungsschiene dokumentieren." },
-  { name: "Heroal", protocols: ["Systemabhängig"], topics: ["Rollladen", "ZIP-Screen", "Fassadensystem"], note: "Systemprofil und Revision besonders beachten." },
-  { name: "Reflexa", protocols: ["Systemabhängig"], topics: ["Markise", "Raffstore", "Insektenschutz", "Sonderformen"], note: "Sonderanlagen mit Fotos und Maßen sehr genau dokumentieren." },
-  { name: "Weinor", protocols: ["BiConnect", "Kabel/Funk je Motor"], topics: ["Markise", "Pergola", "LED", "Heizstrahler"], note: "Zusatzfunktionen wie Licht/Heizung getrennt prüfen." },
-  { name: "Markilux", protocols: ["io/RTS je Ausstattung", "Kabel"], topics: ["Markise", "Tuch", "Arme", "Sensorik"], note: "Tuchnummer, Gestellfarbe und Ausfall dokumentieren." },
-  { name: "Geiger", protocols: ["AIR", "Kabel"], topics: ["Rohrmotor", "Endlagen", "Funk", "Sonnenschutz"], note: "Motortyp und Einlernart vor Programmierung bestimmen." },
-  { name: "Nice", protocols: ["Era", "One", "Kabel/Funk"], topics: ["Rohrmotor", "Tor", "Sender", "Steuerung"], note: "Funkfamilie, Sendercode und Empfänger prüfen." },
-];
-const allManufacturers = [...manufacturers, ...extraManufacturers];
 
-const extraDiagnosisTrees = [
-  { id: "rollladen-klemmt-unten", title: "Rollladen klemmt unten", category: "Rollladen", tools: ["Taschenlampe", "Bürste", "Laser"], firstSteps: ["Endstab prüfen", "Führung reinigen", "Panzer entlasten"], start: { q: "Klemmt der Endstab in der Führung oder auf der Fensterbank?", yes: "Führung reinigen, Endstab kontrollieren, Anschläge und untere Endlage prüfen.", no: "Panzer, Aufhängung und Welle auf Schiefstand oder beschädigte Lamellen prüfen." } },
-  { id: "frost-problem", title: "Rollladen bei Frost fest", category: "Wetter / Bedienung", tools: ["Sichtprüfung", "Kundenhinweis"], firstSteps: ["Nicht mit Gewalt fahren", "Eisbildung prüfen", "Endlage entlasten"], start: { q: "Ist Eis oder angefrorener Endstab sichtbar?", yes: "Nicht weiter belasten. Kunde über Frostschutz/Bedienpause informieren und nach Tauwetter testen.", no: "Führung, Endlage und Hinderniserkennung prüfen." } },
-  { id: "gurt-schwer", title: "Gurt läuft schwer", category: "Gurt / Bedienung", tools: ["Schraubendreher", "Ersatzgurt", "Gurtwickler"], firstSteps: ["Gurtlauf prüfen", "Wickler öffnen", "Gurtscheibe ansehen"], start: { q: "Ist der Gurt ausgefranst oder verdreht?", yes: "Gurt ersetzen, Wickler und Gurtscheibe prüfen.", no: "Panzerlauf, Lager, Führung und Gurtwickler-Feder prüfen." } },
-  { id: "sender-verloren", title: "Sender verloren oder defekt", category: "Funk / Steuerung", tools: ["Ersatzsender", "Herstelleranleitung", "Leiter"], firstSteps: ["Hersteller bestimmen", "Motortyp klären", "Zugang zur Programmtaste"], start: { q: "Gibt es noch einen funktionierenden Sender?", yes: "Sender kopieren/einlernen nach Herstellerangabe.", no: "Motor/Empfängerzugang prüfen, Reset nur nach Absprache und mit Einzelschaltung durchführen." } },
-  { id: "markise-schliesst-schief", title: "Markise schließt nicht sauber", category: "Markise", tools: ["Laser", "Maßband", "Inbusschlüssel"], firstSteps: ["Ausfallprofil ansehen", "Arme vergleichen", "Tuchwicklung prüfen"], start: { q: "Ist das Ausfallprofil links/rechts unterschiedlich?", yes: "Arme, Neigung, Konsolen und Tuchwicklung prüfen.", no: "Endlage, Kassettensitz und Hindernisse prüfen." } },
-  { id: "raffstore-klappert", title: "Raffstore klappert bei Wind", category: "Raffstore", tools: ["Schraubendreher", "Laser", "Windhinweis"], firstSteps: ["Führungen prüfen", "Abstand prüfen", "Windgrenze klären"], start: { q: "Sind Führungsschienen/Seile fest und richtig gespannt?", yes: "Lamellen, Clips, Windgrenze und Kundenhinweis prüfen.", no: "Führung befestigen/spannen und Probefahrt durchführen." } },
-  { id: "rolltor-reversiert", title: "Rolltor stoppt oder reversiert", category: "Tor / Sicherheit", tools: ["Prüfkörper", "Multimeter", "Anleitung"], firstSteps: ["Sicherheitsleiste prüfen", "Lichtschranke prüfen", "Laufweg frei"], start: { q: "Löst eine Sicherheitseinrichtung aus?", yes: "Sicherheitsleiste, Lichtschranke, Kabel und Ausrichtung prüfen.", no: "Kraft, Endlagen, Torlauf und Steuerungsfehler prüfen." } },
-  { id: "insektenschutz-klemmt", title: "Insektenschutzrahmen klemmt", category: "Insektenschutz", tools: ["Maßband", "Gummihammer", "Feile"], firstSteps: ["Rahmenmaß prüfen", "Bürsten prüfen", "Beschläge prüfen"], start: { q: "Ist der Rahmen verzogen oder zu stramm?", yes: "Rahmen richten, Bürstenhöhe prüfen und Beschläge justieren.", no: "Laufprofil reinigen, Griffe und Schließteile prüfen." } },
-];
-const allDiagnosisTrees = [...diagnosisTrees, ...extraDiagnosisTrees];
 
-const extraPartCatalog = [
-  { group: "Rollladen", product: "Rollladen", name: "Aufhängefeder / Befestigungsfeder", asks: ["Wellentyp", "Panzerprofil", "Breite", "Sicherungsart"], tip: "Aufhängungen gleichmäßig verteilen und Hochschiebeschutz beachten." },
-  { group: "Rollladen", product: "Rollladen", name: "Hochschiebesicherung", asks: ["Welle", "Profil", "Elementbreite", "Motor/Gurt"], tip: "Nur passend zur Welle und zum Panzer einsetzen." },
-  { group: "Rollladen", product: "Rollladen", name: "Endstab / Abschlussprofil", asks: ["Profilhöhe", "Farbe", "Breite", "Gummidichtung"], tip: "Seitliche Stopfen und Dichtung mitbestellen." },
-  { group: "Führung", product: "Rollladen/Screen", name: "Führungsschiene", asks: ["Profiltyp", "Tiefe/Breite", "Farbe", "Bürste/Keder"], tip: "Schienenprofil fotografieren und Länge messen." },
-  { group: "Motor", product: "Motor", name: "Taster / Wandsender", asks: ["Hersteller", "Funk/Kabel", "Kanalzahl", "Farbe"], tip: "Kompatibilität mit Motor/Empfänger prüfen." },
-  { group: "Motor", product: "Sensorik", name: "Wind-/Sonnensensor", asks: ["Hersteller", "Funkprotokoll", "Versorgung", "Montageart"], tip: "Sensorposition und Windlogik dokumentieren." },
-  { group: "ZIP-Screen", product: "ZIP-Screen", name: "ZIP-Keder / Tuchführung", asks: ["Hersteller", "Tuchtyp", "Schienenprofil", "Seite"], tip: "Tuch nicht mit Gewalt aus Führung ziehen." },
-  { group: "Markise", product: "Markise", name: "Kurbelgetriebe / Öse", asks: ["Hersteller", "Übersetzung", "Ösenform", "Seite"], tip: "Getriebe vor Ausbau entlasten und Drehrichtung notieren." },
-  { group: "Insektenschutz", product: "Insektenschutz", name: "Eckverbinder / Griff", asks: ["Profilserie", "Farbe", "Rahmentyp", "Position"], tip: "Profilquerschnitt fotografieren." },
-];
-const allPartCatalog = [...partCatalog, ...extraPartCatalog];
 
-const extraMaintenanceTips = [
-  { product: "Motor", title: "Bedienung & Endlagen prüfen", steps: ["Auf/Ab testen", "Endlagen beobachten", "ungewöhnliche Geräusche notieren", "Kundenhinweis geben", "Typenschildfoto speichern"] },
-  { product: "Markise", title: "Windhinweis wiederholen", steps: ["Windautomatik erklären", "Handbetrieb erklären", "Tuch trocken einfahren", "bei Sturm einfahren", "Hinweis dokumentieren"] },
-  { product: "Insektenschutz", title: "Rahmen und Bürsten prüfen", steps: ["Rahmen reinigen", "Bürstenhöhe prüfen", "Laufprofile reinigen", "Schließung testen"] },
-  { product: "Rolltor", title: "Sicherheitseinrichtungen testen", steps: ["Lichtschranke prüfen", "Sicherheitsleiste prüfen", "Notentriegelung erklären", "Probelauf dokumentieren"] },
-];
-const allMaintenanceTips = [...maintenanceTips, ...extraMaintenanceTips];
 
-const extraNorms = [
-  { title: "DIN 18073", text: "Rollläden, Markisen, Rolltore und sonstige Abschlüsse im Bauwesen. In der App als Sammelhinweis für Planung, Ausführung und Dokumentation führen." },
-  { title: "Maschinenrichtlinie / Produktsicherheit", text: "Bei motorischen Anlagen, Toren und beweglichen Bauteilen Sicherheitseinrichtungen, Bedienhinweise und bestimmungsgemäße Verwendung beachten." },
-  { title: "VDE / Elektroarbeiten", text: "Elektrische Anschlüsse nur fachgerecht ausführen. Spannungsfreiheit prüfen und Hersteller-Schaltpläne verwenden." },
-  { title: "Arbeitsschutz / Leiter / Gerüst", text: "Standplatz, Absturzsicherung, PSA und Wetterbedingungen vor Arbeitsbeginn prüfen." },
-  { title: "Befestigung / ETA / Zulassung", text: "Bei Dübeln, Injektionssystemen und Abstandsmontage nur geeignete und freigegebene Systeme verwenden." },
-  { title: "Dokumentationspflicht intern", text: "Fotos, Maße, Bedenkenhinweise, Kundeneinweisung und offene Punkte im Auftrag dokumentieren." },
-];
-const allNorms = [...norms, ...extraNorms];
 
-const extraQuizCards = [
-  { y: 1, t: "Werkzeug", q: "Welches Foto sollte bei Ersatzteilen fast immer gemacht werden?", options: ["Typenschild/Profilfoto", "Mittagessen", "Fahrzeugreifen"], correctIndex: 0, explanation: "Typenschild und Profilfoto helfen bei Hersteller, Serie und Ersatzteilwahl." },
-  { y: 1, t: "Sicherheit", q: "Was muss vor dem Bohren geprüft werden?", options: ["Leitungen und Untergrund", "Musiklautstärke", "Wetter-App Farbe"], correctIndex: 0, explanation: "Leitungssuche und Untergrundprüfung vermeiden Schäden und Unfälle." },
-  { y: 2, t: "Untergrund", q: "Warum sind Siebhülsen bei Lochstein oft wichtig?", options: ["Damit Injektionsmörtel gehalten wird", "Damit die Farbe passt", "Damit der Bohrer schneller ist"], correctIndex: 0, explanation: "Siebhülsen halten den Mörtel im Hohlkammerstein." },
-  { y: 2, t: "Markise", q: "Warum ist eine Markise bei WDVS kritisch?", options: ["Hohe Zugkräfte und Dämmung trägt nicht", "Weil sie immer innen sitzt", "Weil kein Werkzeug nötig ist"], correctIndex: 0, explanation: "Markisen erzeugen hohe Hebelkräfte, die in den tragenden Untergrund abgetragen werden müssen." },
-  { y: 2, t: "Funk", q: "Warum beim Einlernen nur einen Motor bestromen?", options: ["Damit nicht mehrere Motoren falsch gekoppelt werden", "Damit es dunkler ist", "Damit der Kunde wartet"], correctIndex: 0, explanation: "Mehrere aktive Empfänger können sonst gleichzeitig reagieren." },
-  { y: 3, t: "Qualität", q: "Was gehört vor Abschluss geprüft?", options: ["Checkliste, Fotos, Funktion, Einweisung", "Nur der Preis", "Nur die Uhrzeit"], correctIndex: 0, explanation: "Der Abschluss braucht technische und dokumentarische Prüfung." },
-  { y: 3, t: "Tor", q: "Was ist bei Rolltoren besonders wichtig?", options: ["Sicherheitseinrichtungen und Notbedienung", "Tuchfarbe", "Blumenkasten"], correctIndex: 0, explanation: "Tore haben besondere Sicherheitsanforderungen." },
-  { y: 3, t: "Dokumentation", q: "Warum Statusverlauf speichern?", options: ["Damit nachvollziehbar ist, was wann passiert ist", "Damit die App bunter wird", "Damit Fotos verschwinden"], correctIndex: 0, explanation: "Statusverlauf hilft bei Büro, Kunde, Reklamation und Nacharbeit." },
-];
-const allQuizCards = [...quizCards, ...extraQuizCards];
 
-const expandedLearningModules = [
-  { topic: "Grundlagen Rollladen", year: "1", goal: "Bauteile erkennen und Laufweg erklären.", tasks: ["Kasten, Welle, Panzer, Führung benennen", "Skizze anfertigen", "3 typische Fehler nennen"] },
-  { topic: "Werkzeug & Sicherheit", year: "1", goal: "Werkzeug passend auswählen und Arbeit sicher vorbereiten.", tasks: ["PSA prüfen", "Leitungssuche einplanen", "Bohrlochreinigung erklären"] },
-  { topic: "Untergrund & Befestigung", year: "2", goal: "Untergründe unterscheiden und Risiken erkennen.", tasks: ["Beton/Lochstein/WDVS vergleichen", "Befestigungssystem auswählen", "Bedenkenhinweis formulieren"] },
-  { topic: "Motor-Endlagen", year: "2", goal: "Motortyp erkennen und Endlagen sauber prüfen.", tasks: ["mechanisch/elektronisch/Funk unterscheiden", "Drehrichtung prüfen", "Endlagen dokumentieren"] },
-  { topic: "Funk & Sensorik", year: "2", goal: "Sender, Empfänger und Sensorik systematisch prüfen.", tasks: ["Batterie/Kanal/Reichweite prüfen", "nur einen Motor bestromen", "Kundenautomatik erklären"] },
-  { topic: "Markise & Wind", year: "3", goal: "Kräfte, Konsolen und Windhinweise sicher bewerten.", tasks: ["Montagehöhe prüfen", "Konsole/Untergrund bewerten", "Windhinweis dokumentieren"] },
-  { topic: "Fehlerdiagnose", year: "3", goal: "Fehlerbild aufnehmen und strukturiert entscheiden.", tasks: ["Fehler beschreiben", "erste Prüfschritte durchführen", "Ersatzteilbedarf formulieren"] },
-  { topic: "Auftrag abschließen", year: "3", goal: "Qualität, Fotos, PDF und Kundeneinweisung vollständig erledigen.", tasks: ["Checkliste 100%", "Pflichtfotos", "Unterschrift/PDF vorbereiten"] },
-];
 
-const rolePermissionMatrix = [
-  { area: "Aufträge sehen", dev: "alle", meister: "alle Firma", buero: "alle Firma", vorarbeiter: "eigene Kolonne", monteur: "zugewiesen", azubi: "zugewiesen", kunde: "eigene" },
-  { area: "Aufträge ändern", dev: "ja", meister: "ja", buero: "ja", vorarbeiter: "Status/Team", monteur: "Status/Checkliste", azubi: "Bericht/Checkliste", kunde: "nein" },
-  { area: "Team & Codes", dev: "ja", meister: "ja", buero: "ja", vorarbeiter: "lesen", monteur: "nein", azubi: "nein", kunde: "nein" },
-  { area: "PDF/Dokumente", dev: "alle", meister: "alle", buero: "alle", vorarbeiter: "erstellen", monteur: "erstellen", azubi: "Bericht", kunde: "eigene" },
-  { area: "Berichtsheft", dev: "alle", meister: "prüfen", buero: "optional", vorarbeiter: "lesen", monteur: "nein", azubi: "schreiben", kunde: "nein" },
-  { area: "Normen/Rechte", dev: "alle", meister: "ja", buero: "ja", vorarbeiter: "lesen", monteur: "lesen", azubi: "lernen", kunde: "nein" },
-];
 
 const workflowStages = [
-  { title: "1. Anfrage / Auftrag", text: "Kundendaten, Produkt, Termin, Adresse und Priorität erfassen.", checks: ["Kunde angelegt", "Produkt ausgewählt", "Termin geprüft"] },
-  { title: "2. Planung", text: "Team, Kunde, Material und Besonderheiten zuweisen.", checks: ["Monteur/Vorarbeiter zugewiesen", "Kunde zugeordnet", "Risiken markiert"] },
-  { title: "3. Vorbereitung", text: "Checkliste, Werkzeug, Untergrund und Aufmaß vorbereiten.", checks: ["Werkzeugliste offen", "Untergrund geprüft", "Aufmaß vollständig"] },
-  { title: "4. Durchführung", text: "Baustelle bearbeiten, Fotos speichern, Diagnose/Notizen ergänzen.", checks: ["Vorher-Foto", "Checkliste", "Nachher-Foto"] },
-  { title: "5. Abschluss", text: "Funktion, Kundeneinweisung, PDF und offene Punkte prüfen.", checks: ["Funktion geprüft", "Kunde eingewiesen", "PDF erstellt"] },
-  { title: "6. Nacharbeit / Archiv", text: "Offene Punkte, Ersatzteile, Reklamation oder Archivierung steuern.", checks: ["Nacharbeit falls nötig", "Dokument gespeichert", "Status abgeschlossen"] },
+  { id: "request", title: "Anfrage", text: "Kundenwunsch, Produkt, Adresse und Wunschtermin aufnehmen.", actions: [{ id: "prepare", label: "Auftrag vorbereiten", module: "orders" }] },
+  { id: "planning", title: "Planung", text: "Termin festlegen, Zuständigkeit klären und das passende Team einplanen.", actions: [{ id: "team", label: "Team zuweisen", module: "planning" }] },
+  { id: "execution", title: "Durchführung", text: "Arbeiten vor Ort ausführen und die wichtigsten Nachweise festhalten.", actions: [{ id: "checklist", label: "Checkliste öffnen", module: "checklists" }, { id: "photos", label: "Fotos prüfen", module: "photos" }] },
+  { id: "completion", title: "Abschluss", text: "Funktion, Sicherheit, Einweisung und offene Punkte gemeinsam prüfen.", actions: [{ id: "close", label: "Abschluss prüfen", module: "closeOrder" }, { id: "rework", label: "Nacharbeit erstellen" }] },
+  { id: "documents", title: "Rechnung/Dokumentation", text: "Protokoll und PDF bereitstellen; kaufmännische Bearbeitung anschließend abschließen.", actions: [{ id: "pdf", label: "PDF erstellen", module: "pdf" }] },
+  { id: "archive", title: "Archiv", text: "Den vollständig bearbeiteten Auftrag geordnet ablegen.", actions: [{ id: "archive", label: "Archivieren" }] },
 ];
 
-const closingExtraChecks = ["Arbeitsbereich sauber verlassen", "Befestigungs-/Untergrundfoto vorhanden", "Kunde hat Bedienung verstanden", "Pflege- und Windhinweise erklärt", "offene Mängel mit Foto dokumentiert", "Ersatzteilbedarf angelegt", "PDF-Dokument gespeichert", "Statusverlauf aktualisiert"];
 
-
-function Badge({ children }) { return <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-700">{children}</span>; }
-function MiniCheck({ done = false }) { return <span className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full ${done ? "bg-emerald-100 text-emerald-800" : "bg-white text-slate-300"}`}>{done ? <Check size={15} /> : ""}</span>; }
-function DrawingPad({ image, onChange, onSaved }) {
-  const canvasRef = useRef(null);
-  const drawing = useRef(false);
-  const last = useRef({ x: 0, y: 0 });
-  const setupCanvas = () => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
-    canvas.width = 1000;
-    canvas.height = 460;
-    ctx.lineCap = "round";
-    ctx.lineJoin = "round";
-    ctx.lineWidth = 5;
-    ctx.strokeStyle = "#0f172a";
-    ctx.fillStyle = "#ffffff";
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-    if (image) {
-      const img = new Image();
-      img.onload = () => ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-      img.src = image;
-    }
-  };
-  useEffect(() => { setupCanvas(); }, [image]);
-  const getPoint = (event) => {
-    const canvas = canvasRef.current;
-    const rect = canvas.getBoundingClientRect();
-    return { x: ((event.clientX - rect.left) / rect.width) * canvas.width, y: ((event.clientY - rect.top) / rect.height) * canvas.height };
-  };
-  const start = (event) => { event.preventDefault(); event.currentTarget.setPointerCapture?.(event.pointerId); drawing.current = true; last.current = getPoint(event); };
-  const move = (event) => {
-    if (!drawing.current) return;
-    event.preventDefault();
-    const canvas = canvasRef.current;
-    const ctx = canvas.getContext("2d");
-    const next = getPoint(event);
-    ctx.beginPath();
-    ctx.moveTo(last.current.x, last.current.y);
-    ctx.lineTo(next.x, next.y);
-    ctx.stroke();
-    last.current = next;
-  };
-  const stop = () => { drawing.current = false; };
-  const save = () => { const data = canvasRef.current?.toDataURL("image/png") || ""; onChange?.(data); onSaved?.("Skizze wurde lokal gespeichert."); };
-  const clear = () => { onChange?.(""); setTimeout(setupCanvas, 0); onSaved?.("Skizzenfläche wurde geleert."); };
-  return <div className="rounded-3xl bg-slate-50 p-4"><div className="mb-3 flex flex-wrap items-center justify-between gap-2"><div><h3 className="font-black">Freie Skizzenfläche</h3><p className="mt-1 text-sm text-slate-600">Mit Maus, Stift oder Finger zeichnen: Aufmaß, Einbausituation, Fehlerstelle oder schnelle Baustellenskizze.</p></div><div className="flex gap-2"><button onClick={save} className="rounded-2xl bg-slate-950 px-4 py-2 text-xs font-black text-white">Skizze speichern</button><button onClick={clear} className="rounded-2xl bg-white px-4 py-2 text-xs font-black text-slate-700">Leeren</button></div></div><canvas ref={canvasRef} onPointerDown={start} onPointerMove={move} onPointerUp={stop} onPointerLeave={stop} className="h-[280px] w-full touch-none rounded-2xl border border-slate-200 bg-white shadow-inner md:h-[380px]" /></div>;
+function TopBar({ role, setRole, offline, pendingSyncCount, lastSyncedAt, syncError, compact, currentUser, onLogout }) { const selected = roles.find((r) => r.id === role) || roles[0]; const canSwitchRole = currentUser?.role === "dev"; return <div className="sticky top-3 z-20 mb-4 rounded-[1.5rem] border border-slate-200 bg-white/90 p-3 shadow-sm backdrop-blur"><div className={compact ? "space-y-3" : "grid gap-3 md:grid-cols-[1fr_auto] md:items-center"}><div className={compact ? "space-y-2" : "flex flex-col gap-2 sm:flex-row sm:items-center"}><div className="flex items-center gap-2 rounded-2xl bg-slate-950 px-3 py-2 text-white"><UserRound size={18} /><span className="text-sm font-bold">{currentUser?.name || "Nutzer"}</span></div>{canSwitchRole ? <select value={role} onChange={(e) => setRole(e.target.value)} className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-bold outline-none sm:w-auto">{roles.map((r) => <option key={r.id} value={r.id}>{r.label}</option>)}</select> : <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-bold text-slate-700">{selected.label}</div>}{!compact && <p className="text-xs leading-5 text-slate-500">{selected.description}</p>}</div><div className="flex items-start gap-2"><StatusBadge offline={offline} pendingCount={pendingSyncCount} lastSyncedAt={lastSyncedAt} error={syncError} /><button onClick={onLogout} className="rounded-2xl bg-rose-100 px-4 py-3 text-sm font-bold text-rose-800">Abmelden</button></div></div></div>; }
+function Header({ role, orders, selectedOrder, compact, moduleCount }) {
+  const selectedRole = roles.find((item) => item.id === role)?.label || role;
+  const customerView = role === "kunde";
+  return <header className="mb-5 rounded-[2rem] bg-slate-950 p-5 text-white shadow-xl md:p-8"><div className={compact ? "space-y-4" : "grid gap-6 md:grid-cols-[1.4fr_0.6fr] md:items-center"}><div><div className="mb-3 inline-flex items-center gap-2 rounded-full bg-white/10 px-3 py-1 text-xs text-white/80 md:text-sm"><Sun size={16} />{selectedRole}</div><h1 className={compact ? "text-2xl font-black tracking-tight" : "text-3xl font-black tracking-tight md:text-5xl"}>{customerView ? "Kundenportal" : "Monteur-App"}</h1><p className="mt-3 max-w-2xl text-sm leading-6 text-white/75 md:text-base md:leading-7">{customerView ? "Termine, Aufträge und Dokumentstatus auf einen Blick" : "Rollladen & Sonnenschutz Assistent"}</p></div>{!compact && <div className="grid grid-cols-3 gap-3"><div className="rounded-3xl bg-white/10 p-4"><p className="text-3xl font-black">{orders.length}</p><p className="text-sm text-white/70">Aufträge</p></div><div className="rounded-3xl bg-white/10 p-4"><p className="text-3xl font-black">{selectedOrder ? "Ja" : "Nein"}</p><p className="text-sm text-white/70">{customerView ? "Termin vorhanden" : "Aktiver Auftrag"}</p></div><div className="rounded-3xl bg-white/10 p-4"><p className="text-3xl font-black">{moduleCount}</p><p className="text-sm text-white/70">Bereiche</p></div></div>}</div></header>;
 }
-function Card({ children, className = "" }) { return <section className={`rounded-[2rem] bg-white p-4 shadow-sm md:p-6 ${className}`}>{children}</section>; }
-function SectionTitle({ icon: Icon, title, subtitle }) { return <div className="mb-5 flex items-start gap-3"><div className="rounded-2xl bg-slate-950 p-3 text-white"><Icon size={20} /></div><div><h2 className="text-xl font-black tracking-tight text-slate-950 md:text-2xl">{title}</h2><p className="mt-1 max-w-4xl text-sm leading-6 text-slate-600">{subtitle}</p></div></div>; }
-function Field({ label, value, onChange, placeholder = "", type = "text" }) { return <label className="block rounded-2xl bg-slate-50 p-4 text-sm font-bold text-slate-800">{label}<input type={type} value={value ?? ""} onChange={(e) => onChange?.(e.target.value)} placeholder={placeholder} className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm font-medium outline-none focus:border-slate-950" /></label>; }
-function LoginField({ label, value, onChange, placeholder = "", type = "text", autoComplete = "off" }) { return <label className="block rounded-2xl bg-slate-50 p-4 text-sm font-bold text-slate-800">{label}<input type={type} value={value ?? ""} onChange={(e) => onChange?.(e.target.value)} placeholder={placeholder} autoComplete={autoComplete} className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm font-medium outline-none placeholder:text-slate-400 placeholder:font-medium focus:border-slate-950" /></label>; }
-function TextArea({ label, value, onChange, placeholder = "" }) { return <label className="block rounded-2xl bg-slate-50 p-4 text-sm font-bold text-slate-800">{label}<textarea value={value ?? ""} onChange={(e) => onChange?.(e.target.value)} placeholder={placeholder} className="mt-2 h-28 w-full resize-none rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm font-medium outline-none focus:border-slate-950" /></label>; }
-function CopyBox({ title, text }) { const [copied, setCopied] = useState(false); const copy = async () => { try { await navigator.clipboard.writeText(text); setCopied(true); setTimeout(() => setCopied(false), 1200); } catch {} }; return <article className="rounded-3xl bg-slate-50 p-5"><h3 className="font-bold">{title}</h3><textarea readOnly value={text} className="mt-3 h-32 w-full resize-none rounded-2xl border border-slate-200 bg-white p-3 text-sm leading-6" /><button onClick={copy} className="mt-3 flex items-center gap-2 rounded-2xl bg-slate-950 px-4 py-3 text-sm font-bold text-white">{copied ? <Check size={16} /> : <Copy size={16} />}{copied ? "Kopiert" : "Text kopieren"}</button></article>; }
-function TopBar({ role, setRole, offline, compact, currentUser, onLogout }) { const selected = roles.find((r) => r.id === role) || roles[0]; const canSwitchRole = currentUser?.role === "dev"; return <div className="sticky top-3 z-20 mb-4 rounded-[1.5rem] border border-slate-200 bg-white/90 p-3 shadow-sm backdrop-blur"><div className={compact ? "space-y-3" : "grid gap-3 md:grid-cols-[1fr_auto] md:items-center"}><div className={compact ? "space-y-2" : "flex flex-col gap-2 sm:flex-row sm:items-center"}><div className="flex items-center gap-2 rounded-2xl bg-slate-950 px-3 py-2 text-white"><UserRound size={18} /><span className="text-sm font-bold">{currentUser?.name || "Nutzer"}</span></div>{canSwitchRole ? <select value={role} onChange={(e) => setRole(e.target.value)} className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-bold outline-none sm:w-auto">{roles.map((r) => <option key={r.id} value={r.id}>{r.label}</option>)}</select> : <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-bold text-slate-700">{selected.label}</div>}{!compact && <p className="text-xs leading-5 text-slate-500">{selected.description}</p>}</div><div className="flex gap-2"><div className={`flex items-center justify-center gap-2 rounded-2xl px-4 py-3 text-sm font-bold ${offline ? "bg-amber-100 text-amber-900" : "bg-emerald-100 text-emerald-800"}`}>{offline ? <WifiOff size={18} /> : <Wifi size={18} />}{offline ? "Offline erkannt" : "Online"}</div><button onClick={onLogout} className="rounded-2xl bg-rose-100 px-4 py-3 text-sm font-bold text-rose-800">Abmelden</button></div></div></div>; }
-function Header({ role, orders, selectedOrder, offline, compact }) { const selectedRole = roles.find((r) => r.id === role)?.label || role; return <header className="mb-5 rounded-[2rem] bg-slate-950 p-5 text-white shadow-xl md:p-8"><div className={compact ? "space-y-4" : "grid gap-6 md:grid-cols-[1.4fr_0.6fr] md:items-center"}><div><div className="mb-3 inline-flex items-center gap-2 rounded-full bg-white/10 px-3 py-1 text-xs text-white/80 md:text-sm"><Sun size={16} />{selectedRole}</div><h1 className={compact ? "text-2xl font-black tracking-tight" : "text-3xl font-black tracking-tight md:text-5xl"}>Monteur-App</h1><p className="mt-3 max-w-2xl text-sm leading-6 text-white/75 md:text-base md:leading-7">Rollladen & Sonnenschutz Assistent</p></div>{!compact && <div className="grid grid-cols-2 gap-3"><div className="rounded-3xl bg-white/10 p-4"><p className="text-3xl font-black">{orders.length}</p><p className="text-sm text-white/70">Aufträge</p></div><div className="rounded-3xl bg-white/10 p-4"><p className="text-3xl font-black">{selectedOrder ? "Ja" : "Nein"}</p><p className="text-sm text-white/70">Aktiver Auftrag</p></div><div className="rounded-3xl bg-white/10 p-4"><p className="text-3xl font-black">{offline ? "Ja" : "Nein"}</p><p className="text-sm text-white/70">Offline</p></div><div className="rounded-3xl bg-white/10 p-4"><p className="text-3xl font-black">{navItems.length}</p><p className="text-sm text-white/70">Module</p></div></div>}</div></header>; }
 function MobileBottomNav({ items, active, setActive }) { const [openMore, setOpenMore] = useState(false); const mainItems = items.slice(0, 5); const moreItems = items.slice(5); return <>{openMore && <div className="fixed inset-x-3 bottom-24 z-40 max-h-[55vh] overflow-y-auto rounded-[1.5rem] border border-slate-200 bg-white p-3 shadow-2xl"><p className="mb-3 px-2 text-xs font-bold uppercase tracking-wide text-slate-500">Weitere Bereiche</p><div className="grid grid-cols-2 gap-2">{moreItems.map(({ id, label, icon: Icon }) => <button key={id} onClick={() => { setActive(id); setOpenMore(false); }} className={`flex items-center gap-2 rounded-2xl px-3 py-3 text-left text-xs font-bold ${active === id ? "bg-slate-950 text-white" : "bg-slate-50 text-slate-700"}`}><Icon size={17} />{label}</button>)}</div></div>}<nav className="fixed inset-x-0 bottom-0 z-50 border-t border-slate-200 bg-white/95 px-2 pb-[env(safe-area-inset-bottom)] pt-2 shadow-2xl backdrop-blur"><div className="grid grid-cols-6 gap-1">{mainItems.map(({ id, label, icon: Icon }) => <button key={id} onClick={() => setActive(id)} className={`flex flex-col items-center justify-center rounded-2xl px-1 py-2 text-[10px] font-bold ${active === id ? "bg-slate-950 text-white" : "text-slate-600"}`}><Icon size={18} /><span className="mt-1 max-w-full truncate">{label}</span></button>)}<button onClick={() => setOpenMore((v) => !v)} className="flex flex-col items-center justify-center rounded-2xl px-1 py-2 text-[10px] font-bold text-slate-600"><Layers size={18} /><span className="mt-1">Mehr</span></button></div></nav></>; }
 
 function LoginGate({
@@ -730,13 +414,11 @@ function LoginGate({
   </main>;
 }
 
-function QuizTrainer({ cards }) { const [year, setYear] = useState("all"); const [topic, setTopic] = useState("all"); const filtered = cards.filter((c) => (year === "all" || String(c.y) === year) && (topic === "all" || c.t === topic)); const topics = [...new Set(cards.map((c) => c.t))]; const [idx, setIdx] = useState(0); const [selected, setSelected] = useState(null); const card = filtered[idx] || filtered[0]; useEffect(() => { setIdx(0); setSelected(null); }, [year, topic]); if (!card) return null; if (idx >= filtered.length) return <div className="rounded-3xl bg-slate-950 p-6 text-white"><h3 className="text-2xl font-black">Quiz abgeschlossen</h3><button onClick={() => { setIdx(0); setSelected(null); }} className="mt-4 rounded-2xl bg-white px-4 py-2 text-sm font-bold text-slate-950">Neu starten</button></div>; const choose = (i) => { if (selected !== null) return; setSelected(i); if (i === card.correctIndex) setTimeout(() => { setIdx((v) => v + 1); setSelected(null); }, 850); }; return <div className="rounded-3xl bg-slate-50 p-5"><div className="mb-4 grid gap-3 md:grid-cols-3"><select value={year} onChange={(e) => setYear(e.target.value)} className="rounded-2xl border border-slate-200 bg-white px-3 py-3 text-sm font-bold"><option value="all">Alle Ausbildungsjahre</option><option value="1">1. Jahr</option><option value="2">2. Jahr</option><option value="3">3. Jahr</option></select><select value={topic} onChange={(e) => setTopic(e.target.value)} className="rounded-2xl border border-slate-200 bg-white px-3 py-3 text-sm font-bold"><option value="all">Alle Themen</option>{topics.map((t) => <option key={t}>{t}</option>)}</select><div className="rounded-2xl bg-white px-3 py-3 text-sm font-bold">Frage {idx + 1} von {filtered.length}</div></div><article className="rounded-3xl bg-white p-5 shadow-sm"><h3 className="text-xl font-black leading-8">{card.q}</h3><div className="mt-5 space-y-3">{card.options.map((option, i) => { const correct = selected !== null && i === card.correctIndex; const wrong = selected === i && i !== card.correctIndex; return <button key={option} onClick={() => choose(i)} className={`w-full rounded-2xl border p-4 text-left text-sm font-bold ${correct ? "border-emerald-200 bg-emerald-50 text-emerald-900" : wrong ? "border-rose-200 bg-rose-50 text-rose-900" : "border-slate-100 bg-slate-50 hover:bg-white"}`}><span className="mr-2">{String.fromCharCode(65 + i)}.</span>{option}</button>; })}</div>{selected !== null && <div className="mt-4 rounded-2xl bg-slate-50 p-4 text-sm leading-6"><strong>Erklärung:</strong> {card.explanation}</div>}{selected !== null && selected !== card.correctIndex && <button onClick={() => setSelected(null)} className="mt-4 rounded-2xl bg-slate-950 px-4 py-2 text-sm font-bold text-white">Nochmal versuchen</button>}</article></div>; }
-function DiagnosisStepMode({ trees }) { const [treeId, setTreeId] = useState(trees[0]?.id || ""); const [answer, setAnswer] = useState(null); const tree = trees.find((item) => item.id === treeId) || trees[0]; if (!tree) return null; return <div className="mb-5 rounded-3xl bg-slate-950 p-5 text-white"><div className="mb-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between"><div><p className="text-xs font-bold uppercase text-white/50">Interaktiver Schrittmodus</p><h3 className="mt-1 text-xl font-black">{tree.title}</h3></div><select value={treeId} onChange={(e) => { setTreeId(e.target.value); setAnswer(null); }} className="rounded-2xl bg-white px-3 py-2 text-sm font-bold text-slate-950">{trees.map((item) => <option key={item.id} value={item.id}>{item.title}</option>)}</select></div><div className="rounded-2xl bg-white/10 p-4 text-sm font-bold leading-6">{tree.start.q}</div><div className="mt-4 grid gap-3 md:grid-cols-2"><button onClick={() => setAnswer("yes")} className="rounded-2xl bg-emerald-100 px-4 py-3 text-sm font-black text-emerald-900">Ja</button><button onClick={() => setAnswer("no")} className="rounded-2xl bg-rose-100 px-4 py-3 text-sm font-black text-rose-900">Nein</button></div>{answer && <div className="mt-4 rounded-2xl bg-white p-4 text-sm font-bold leading-6 text-slate-900"><strong>Nächster Prüfschritt:</strong> {answer === "yes" ? tree.start.yes : tree.start.no}</div>}</div>; }
 
 export default function App() {
   const device = useDeviceLayout();
-  const [role, setRoleState] = useState(() => loadJson("rs-role", "dev"));
-  const [offline, setOfflineState] = useState(() => (typeof navigator !== "undefined" ? !navigator.onLine : false));
+  const [role, setRoleState] = useLocalStorage("rs-role", "dev");
+  const { offline } = useOnlineStatus();
   const [active, setActive] = useState("dashboard");
   const [orders, setOrders] = useState(() => loadJson("rs-orders", [{ id: "A-1001", customer: "Musterkunde GmbH", contact: "Max Mustermann", phone: "", email: "", address: "Musterstraße 1", date: todayIso(), time: "08:00", assignedTo: "Max Mustermann", product: "vorbaurollladen", substrate: "WDVS", drive: "Funkmotor", installType: "Renovierung", windCritical: true, status: "offen", priority: "normal", orderType: "Montage", notes: "3 Elemente, Funkmotor, WDVS prüfen" }]));
   const [selectedOrderId, setSelectedOrderId] = useState(() => loadJson("rs-selected-order", "A-1001"));
@@ -756,7 +438,8 @@ export default function App() {
   const [diagnosisCategory, setDiagnosisCategory] = useState("all");
   const [partQuery, setPartQuery] = useState("");
   const [partGroup, setPartGroup] = useState("all");
-  const [partRequest, setPartRequest] = useState({ product: "Rollladen", manufacturer: "", part: "", measure: "", color: "", shaft: "", motor: "", serial: "", urgent: false });
+  const [partRequest, setPartRequest] = useState(() => createEmptyPartRequest());
+  const [partRequests, setPartRequests] = useLocalStorage("rs-part-requests", []);
   const [manufacturerQuery, setManufacturerQuery] = useState("");
   const [calc, setCalc] = useState({ count: 3, material: 420, labor: 4, rate: 65, travel: 45, wdvs: 0, disposal: 0 });
   const [reportText, setReportText] = useState("Heute Vorbaurollladen montiert, Führungsschienen gebohrt, Motor eingestellt und Kunden eingewiesen.");
@@ -780,36 +463,31 @@ export default function App() {
   const [companyPeople, setCompanyPeople] = useState(() => loadJson("rs-company-people", defaultCompanyPeople()));
   const [personForm, setPersonForm] = useState({ name: "", role: "monteur", phone: "", address: "", team: "Kolonne 1", trainingYear: "1" });
   const [codeLogin, setCodeLogin] = useState({ name: "", code: "" });
-  const [teamSearch, setTeamSearch] = useState("");
   const [supabaseStatus, setSupabaseStatus] = useState("");
   const [companyAuthMode, setCompanyAuthMode] = useState("register");
   const [pendingRegistration, setPendingRegistration] = useState(() => loadJson("rs-pending-registration", null));
   const [initialCloudLoaded, setInitialCloudLoaded] = useState(false);
-  const [autoSyncEnabled, setAutoSyncEnabled] = useState(true);
-  const [autoSyncStatus, setAutoSyncStatus] = useState("Wartet auf Login");
-  const [syncQueue, setSyncQueue] = useState(() => loadJson("rs-sync-queue", []));
+  const [syncQueue, setSyncQueue] = useLocalStorage("rs-sync-queue", []);
+  const [lastSyncedAt, setLastSyncedAt] = useLocalStorage("rs-last-synced-at", "");
+  const [syncError, setSyncError] = useState("");
   const [pdfDocuments, setPdfDocuments] = useState(() => loadJson("rs-pdf-documents", []));
   const [moduleChecks, setModuleChecks] = useState(() => loadJson("rs-module-checks", {}));
+  const [learningProgress, setLearningProgress] = useLocalStorage("rs-learning-progress", {});
   const [sketchImage, setSketchImage] = useState(() => loadJson("rs-free-sketch", ""));
+  const [savedSketches, setSavedSketches] = useLocalStorage("rs-saved-sketches", []);
   const [workflowTemplateId, setWorkflowTemplateId] = useState("rollladen-montage");
+  const syncInFlightRef = useRef(false);
+  const syncRetryRequestedRef = useRef(false);
 
-  const setRole = (value) => { setRoleState(value); saveJson("rs-role", value); };
+  const setRole = (value) => setRoleState(value);
+  const appRole = authUser?.role === "dev" ? role : authUser?.role || role;
+  const allowedNav = useMemo(() => appRole === "dev" ? navItems : navItems.filter((n) => n.roles.includes(appRole)), [appRole]);
+  const canOpenModule = (moduleId) => allowedNav.some((item) => item.id === moduleId);
+  const pendingSyncCount = useMemo(() => syncQueue.filter((item) => item.status !== "synchronisiert").length, [syncQueue]);
+  const pendingSyncVersion = useMemo(() => Math.max(0, ...syncQueue.filter((item) => item.status !== "synchronisiert").map((item) => Number(item.id) || 0)), [syncQueue]);
   useEffect(() => {
-    const updateOnlineStatus = () => {
-      const nextOffline = typeof navigator !== "undefined" ? !navigator.onLine : false;
-      setOfflineState(nextOffline);
-      if (nextOffline) setAutoSyncStatus("Offline erkannt – Änderungen bleiben lokal und werden später synchronisiert.");
-      else setAutoSyncStatus(authUser ? "Online – Auto-Sync bereit" : "Wartet auf Login");
-    };
-    updateOnlineStatus();
-    window.addEventListener("online", updateOnlineStatus);
-    window.addEventListener("offline", updateOnlineStatus);
-    return () => {
-      window.removeEventListener("online", updateOnlineStatus);
-      window.removeEventListener("offline", updateOnlineStatus);
-    };
-  }, [authUser?.id]);
-  const allowedNav = useMemo(() => role === "dev" ? navItems : navItems.filter((n) => n.roles.includes(role)), [role]);
+    if (authUser?.role && authUser.role !== "dev" && role !== authUser.role) setRole(authUser.role);
+  }, [authUser?.role, role]);
   useEffect(() => { if (!allowedNav.some((n) => n.id === active)) setActive("dashboard"); }, [allowedNav, active]);
   useEffect(() => saveJson("rs-orders", orders), [orders]);
   useEffect(() => saveJson("rs-selected-order", selectedOrderId), [selectedOrderId]);
@@ -826,25 +504,24 @@ export default function App() {
   useEffect(() => saveJson("rs-company-people", companyPeople), [companyPeople]);
   useEffect(() => saveJson("rs-pending-registration", pendingRegistration), [pendingRegistration]);
   useEffect(() => saveJson("rs-pdf-form-data", pdfFormData), [pdfFormData]);
-  useEffect(() => saveJson("rs-sync-queue", syncQueue), [syncQueue]);
   useEffect(() => saveJson("rs-pdf-documents", pdfDocuments), [pdfDocuments]);
   useEffect(() => saveJson("rs-module-checks", moduleChecks), [moduleChecks]);
   useEffect(() => saveJson("rs-free-sketch", sketchImage), [sketchImage]);
 
   const currentPerson = authUser?.personId ? companyPeople.find((p) => p.id === authUser.personId) : null;
-  const isCompanyAdmin = ["dev", "meister", "buero"].includes(role);
+  const isCompanyAdmin = ["dev", "meister", "buero"].includes(appRole);
   const visibleOrders = useMemo(() => {
     if (isCompanyAdmin) return orders;
-    if (!currentPerson) return orders;
+    if (!currentPerson) return appRole === "kunde" ? [] : orders;
     if (["monteur", "vorarbeiter", "azubi"].includes(currentPerson.role)) {
       return orders.filter((o) => (o.assignedMemberIds || []).includes(currentPerson.id) || o.assignedTo === currentPerson.name);
     }
     if (currentPerson.role === "kunde") {
       return orders.filter((o) => o.customerPersonId === currentPerson.id || o.customer === currentPerson.name);
     }
-    return orders;
-  }, [orders, isCompanyAdmin, currentPerson?.id, currentPerson?.role, currentPerson?.name]);
-  const selectedOrder = visibleOrders.find((o) => o.id === selectedOrderId) || visibleOrders[0] || orders[0];
+    return appRole === "kunde" ? [] : orders;
+  }, [orders, isCompanyAdmin, appRole, currentPerson?.id, currentPerson?.role, currentPerson?.name]);
+  const selectedOrder = visibleOrders.find((o) => o.id === selectedOrderId) || visibleOrders[0] || (isCompanyAdmin ? orders[0] : null);
   const selectedProduct = productTypes.find((p) => p.id === selectedOrder?.product) || productTypes[0];
   const newOrderProduct = productTypes.find((p) => p.id === newOrder.product) || productTypes[0];
   const buildChecklistItems = (productId, source = {}) => [...new Set([...(checklistTemplates[productId] || []), ...dynamicChecklistRules.filter((rule) => Object.entries(rule.when).every(([key, value]) => source[key] === value)).flatMap((rule) => rule.items)])];
@@ -856,24 +533,83 @@ export default function App() {
   const measurementFields = measurementRequiredFields[selectedProduct.id] || ["Breite", "Höhe", "Untergrund", "Bedienseite", "Foto"];
   const orderMeasurements = measurementValues[selectedOrder?.id] || {};
   const missingMeasurements = measurementFields.filter((field) => !orderMeasurements[field]);
-  const closeChecks = qualityRequirements.map((item) => { let done = false; if (item.type === "checklist") done = selectedChecklistItems.length > 0 && selectedChecklistItems.every((check) => checks[selectedOrder?.id]?.[check]); if (item.type === "photos") done = ["Vorher", "Nachher", "Typenschild"].every((key) => photos[key]); if (item.type === "notes") done = Boolean(selectedOrder?.notes?.trim()); if (item.type === "manual") done = Boolean(manualQuality[selectedOrder?.id]?.[item.id]); return { ...item, done }; });
-  const closeReady = closeChecks.every((item) => item.done);
+  const closingValues = manualQuality[selectedOrder?.id] || {};
+  const hasRequiredPhotos = ["Vorher", "Nachher", "Typenschild"].every((key) => photos[key]);
+  const hasPdfProtocol = pdfDocuments.some((document) => document.orderId === selectedOrder?.id);
+  const closingGroups = [
+    { id: "work", title: "Arbeiten erledigt", items: [
+      { id: "product-checklist", label: "Produkt-Checkliste vollständig", done: selectedChecklistItems.length > 0 && selectedChecklistItems.every((item) => checks[selectedOrder?.id]?.[item]), required: true, automatic: true, action: "checklists" },
+      { id: "work-area-clean", label: "Arbeitsbereich sauber und vollständig verlassen", done: Boolean(closingValues["work-area-clean"]), required: true },
+    ] },
+    { id: "function", title: "Funktion geprüft", items: [
+      { id: "motor", label: "Anlage, Antrieb und Bedienung getestet", done: Boolean(closingValues.motor), required: true },
+      { id: "function-result", label: "Endlagen, Lauf und Bedienung ohne offenen Funktionsfehler", done: Boolean(closingValues["function-result"]), required: true },
+    ] },
+    { id: "safety", title: "Sicherheit geprüft", items: [
+      { id: "safety-check", label: "Sicherheitsrelevante Funktionen und Befestigungen geprüft", done: Boolean(closingValues["safety-check"]), required: true },
+      { id: "safety-note", label: "Herstellerhinweise und erkennbare Risiken berücksichtigt", done: Boolean(closingValues["safety-note"]), required: true },
+    ] },
+    { id: "photos", title: "Fotos vollständig", items: [
+      { id: "photos", label: "Vorher-, Nachher- und Typenschildfoto vorhanden", done: hasRequiredPhotos, required: true, automatic: true, action: "photos" },
+    ] },
+    { id: "customer", title: "Kunde eingewiesen", items: [
+      { id: "customer", label: "Bedienung und Besonderheiten erklärt", done: Boolean(closingValues.customer), required: true },
+      { id: "customer-care", label: "Pflege-, Wind- und Nutzungshinweise übergeben", done: Boolean(closingValues["customer-care"]), required: true },
+    ] },
+    { id: "documents", title: "Dokumente erstellt", items: [
+      { id: "documentation", label: "Arbeitsergebnis und Hinweise im Auftrag dokumentiert", done: Boolean(selectedOrder?.notes?.trim()), required: true, automatic: true, action: "orders" },
+      { id: "pdf-protocol", label: "PDF-Protokoll erstellt", done: hasPdfProtocol, required: false, automatic: true, action: "pdf", recommended: true },
+    ] },
+    { id: "open-points", title: "Offene Punkte", items: [
+      { id: "open-points-reviewed", label: "Offene Punkte erfasst oder ausdrücklich als erledigt geprüft", done: Boolean(closingValues["open-points-reviewed"]), required: true },
+      ...(closingValues["parts-status"] === "missing" ? [{ id: "part-request-started", label: "Ersatzteil-Anfrage gestartet", done: Boolean(selectedOrder?.partRequestStartedAt), required: true, automatic: true, action: "parts" }] : []),
+    ], decision: { id: "parts-status", label: "Ersatzteilstatus festlegen", value: closingValues["parts-status"] || "", options: [{ value: "complete", label: "Kein Ersatzteil offen" }, { value: "missing", label: "Ersatzteil fehlt" }], required: true } },
+    { id: "rework", title: "Nacharbeit nötig", items: [
+      ...(closingValues["rework-status"] === "needed" ? [{ id: "rework-created", label: "Nacharbeitsauftrag erzeugt", done: Boolean(selectedOrder?.reworkOrderId), required: true, automatic: true, action: "rework" }] : []),
+    ], decision: { id: "rework-status", label: "Nacharbeit bewerten", value: closingValues["rework-status"] || "", options: [{ value: "none", label: "Keine Nacharbeit nötig" }, { value: "needed", label: "Nacharbeit nötig" }], required: true } },
+  ];
+  const unresolvedQuality = closingGroups.flatMap((group) => [
+    ...group.items.filter((item) => item.required && !item.done),
+    ...(group.decision?.required && !group.decision.value ? [{ id: group.decision.id, label: group.decision.label, action: "closeOrder" }] : []),
+  ]);
+  const closeReady = Boolean(selectedOrder) && unresolvedQuality.length === 0;
   const filteredOrders = visibleOrders.filter((o) => [o.id, o.customer, o.address, o.status, o.priority, o.notes, productTypes.find((p) => p.id === o.product)?.name || "", ...(o.assignedMemberIds || []).map((id) => companyPeople.find((p) => p.id === id)?.name || "")].join(" ").toLowerCase().includes(orderSearch.toLowerCase()));
   const todaysOrders = visibleOrders.filter((o) => o.date === todayIso());
   const openReports = savedReports.filter((r) => r.status !== "Freigegeben");
   const activeOrders = visibleOrders.filter((o) => !["archiviert", "abgerechnet"].includes(o.status));
   const waitingPartOrders = visibleOrders.filter((o) => String(o.status || "").toLowerCase().includes("teil"));
   const reworkOrders = visibleOrders.filter((o) => String(o.orderType || "").toLowerCase().includes("nacharbeit") || String(o.status || "").toLowerCase().includes("nacharbeit"));
-  const roleHome = roleHomeConfig[role] || roleHomeConfig.monteur;
-  const myReports = role === "azubi" && currentPerson ? savedReports.filter((r) => r.userName === currentPerson.name || r.createdBy === currentPerson.id) : savedReports;
-  const currentCustomerOrders = currentPerson?.role === "kunde" ? visibleOrders : visibleOrders.filter((o) => o.customerPersonId || o.customer);
+  const roleHome = roleHomeConfig[appRole] || roleHomeConfig.monteur;
+  const learningUserId = currentPerson?.id || authUser?.id || "local-azubi";
+  const learningUserName = currentPerson?.name || authUser?.name || "";
+  const myReports = appRole === "azubi" ? savedReports.filter((report) => report.userName === learningUserName || report.createdBy === learningUserId || (!report.userName && !report.createdBy)) : savedReports;
+  const learnerTrainingYear = Math.max(1, Math.min(4, Number(currentPerson?.trainingYear || reportYear || 1)));
+  const currentLearningProgress = learningProgress?.[learningUserId] || {};
+  const currentCurriculum = learningModules.filter((module) => module.year <= learnerTrainingYear);
+  const completedLearningModules = currentCurriculum.filter((module) => isLearningModuleComplete(currentLearningProgress[module.id]));
+  const openLearningModules = currentCurriculum.filter((module) => !isLearningModuleComplete(currentLearningProgress[module.id]));
+  const nextYearLearningModules = learningModules.filter((module) => module.year > learnerTrainingYear && !isLearningModuleComplete(currentLearningProgress[module.id]));
+  const recommendedLearningModules = [...openLearningModules, ...nextYearLearningModules].slice(0, 3);
+  const learningDashboard = {
+    open: openLearningModules.length,
+    completed: completedLearningModules.length,
+    total: currentCurriculum.length,
+    percent: currentCurriculum.length ? Math.round((completedLearningModules.length / currentCurriculum.length) * 100) : 0,
+    recommended: recommendedLearningModules,
+    openReports: myReports.filter((report) => report.status !== "Freigegeben").length,
+  };
+  const canViewLearningTeam = authUser?.role === "dev" || ["meister", "buero"].includes(appRole);
+  const currentCustomerOrders = appRole === "kunde" ? visibleOrders : visibleOrders.filter((o) => o.customerPersonId || o.customer);
+  const currentCustomerDocuments = useMemo(() => {
+    const customerOrderIds = new Set(currentCustomerOrders.map((order) => order.id));
+    return pdfDocuments.filter((document) => customerOrderIds.has(document.orderId));
+  }, [currentCustomerOrders, pdfDocuments]);
   const currentOrderHistory = selectedOrder?.statusHistory || [{ status: selectedOrder?.status || "offen", at: selectedOrder?.updatedAt || selectedOrder?.createdAt || "", by: authUser?.name || "System", note: "Aktueller Status" }];
-  const unresolvedQuality = closeChecks.filter((item) => !item.done);
   const selectedWorkflowTemplate = orderWorkflowTemplates.find((t) => t.id === workflowTemplateId) || orderWorkflowTemplates[0];
   const diagnosisCategories = ["all", ...new Set(allDiagnosisTrees.map((d) => d.category))];
-  const filteredDiagnosisTrees = allDiagnosisTrees.filter((d) => (diagnosisCategory === "all" || d.category === diagnosisCategory) && [d.title, d.category, d.start.q, d.start.yes, d.start.no, ...(d.tools || []), ...(d.firstSteps || [])].join(" ").toLowerCase().includes(diagnosisQuery.toLowerCase()));
+  const filteredDiagnosisTrees = allDiagnosisTrees.filter((d) => (diagnosisCategory === "all" || d.category === diagnosisCategory) && [d.title, d.category, d.start.q, d.start.yes, d.start.no, ...(d.tools || []), ...(d.firstSteps || []), ...(d.productIds || [])].join(" ").toLowerCase().includes(diagnosisQuery.toLowerCase()));
   const filteredParts = allPartCatalog.filter((p) => (partGroup === "all" || p.group === partGroup) && [p.name, p.group, p.product, ...p.asks].join(" ").toLowerCase().includes(partQuery.toLowerCase()));
-  const filteredMakers = allManufacturers.filter((m) => [m.name, ...m.protocols, ...m.topics, m.note].join(" ").toLowerCase().includes(manufacturerQuery.toLowerCase()));
+  const filteredMakers = allManufacturers.filter((m) => [m.name, ...m.protocols, ...m.topics, ...(m.productIds || []), m.note].join(" ").toLowerCase().includes(manufacturerQuery.toLowerCase()));
   const net = Number(calc.count) * Number(calc.material) + Number(calc.labor) * Number(calc.rate) + Number(calc.travel) + Number(calc.wdvs) + Number(calc.disposal);
   const selectedReportTemplate = reportActivityTemplates.find((template) => template.id === reportTemplateId) || reportActivityTemplates[0];
   const reportCheckedItems = selectedChecklistItems.filter((item) => checks[selectedOrder?.id]?.[item]);
@@ -883,7 +619,25 @@ export default function App() {
   const toggleModuleCheck = (scope, item) => setModuleChecks((current) => ({ ...current, [scope]: { ...(current[scope] || {}), [item]: !current[scope]?.[item] } }));
   const checkButton = (scope, item) => <button key={item} onClick={() => toggleModuleCheck(scope, item)} className={`flex w-full items-center gap-3 rounded-2xl p-3 text-left text-sm font-bold ${isModuleChecked(scope, item) ? "bg-emerald-50 text-emerald-900" : "bg-white text-slate-700"}`}><MiniCheck done={isModuleChecked(scope, item)} />{item}</button>;
   const markScopeDone = (scope, items = []) => setModuleChecks((current) => ({ ...current, [scope]: Object.fromEntries(items.map((item) => [item, true])) }));
-  const partRequestText = `Ersatzteil-Anfrage für Auftrag ${selectedOrder?.id || "ohne Auftragsnummer"} / ${partRequest.product}:\n\nKunde: ${selectedOrder?.customer || "-"}\nAdresse: ${selectedOrder?.address || "-"}\nGesuchtes Bauteil: ${partRequest.part || "bitte prüfen"}\nHersteller: ${partRequest.manufacturer || "unbekannt"}\nMaß/Typ/Profil: ${partRequest.measure || "bitte prüfen"}\nFarbe: ${partRequest.color || "nicht angegeben"}\nWelle/Führung/Seite: ${partRequest.shaft || "nicht angegeben"}\nMotortyp/Steuerung: ${partRequest.motor || "nicht angegeben"}\nSeriennummer/Typenschild: ${partRequest.serial || "nicht vorhanden"}\nDringlichkeit: ${partRequest.urgent ? "dringend" : "normal"}\nFoto vorhanden: ${Object.keys(photos).length ? "ja" : "nein"}\n\nBitte Preis, Lieferzeit, kompatible Alternative und benötigtes Zubehör mitteilen.`;
+  const updateLearningProgress = (learnerId, moduleId, checkpointId, checked) => {
+    setLearningProgress((current) => ({
+      ...(current || {}),
+      [learnerId]: {
+        ...((current || {})[learnerId] || {}),
+        [moduleId]: {
+          ...((current || {})[learnerId]?.[moduleId] || {}),
+          [checkpointId]: checked,
+          updatedAt: new Date().toISOString(),
+          updatedBy: authUser?.name || "Nutzer",
+        },
+      },
+    }));
+    addToSyncQueue("Lernfortschritt geändert", { learnerId, moduleId, checkpointId, checked });
+  };
+  const partRequestOrder = orders.find((order) => order.id === partRequest.orderId) || selectedOrder;
+  const partPhotoScope = `ersatzteil-anfrage-${partRequest.draftKey || partRequest.id || partRequestOrder?.id || "neu"}`;
+  const partPhotoChecks = moduleChecks[partPhotoScope] || {};
+  const partRequestText = buildPartRequestText(partRequest, partRequestOrder, partPhotoChecks);
   const customerTemplateForOrder = (text) => text.replaceAll("{kunde}", selectedOrder?.customer || "Kunde").replaceAll("{produkt}", selectedProduct.name).replaceAll("{termin}", `${selectedOrder?.date || "Termin"} ${selectedOrder?.time || ""}`.trim()).replaceAll("{adresse}", selectedOrder?.address || "Adresse");
   const currentPdfTemplate = pdfTemplateDefinitions[pdfTarget] || pdfTemplateDefinitions["Montageprotokoll"];
   const currentPdfValues = pdfFormData[selectedOrder?.id || "global"]?.[pdfTarget] || {};
@@ -923,8 +677,8 @@ export default function App() {
     delete nextOrder[pdfTarget];
     return { ...current, [orderKey]: nextOrder };
   });
-  const pdfFileName = `${pdfTarget.replaceAll(" ", "_")}_${selectedOrder?.id || "Auftrag"}_${(selectedOrder?.customer || "Kunde").replaceAll(" ", "_")}.pdf`;
-  const pdfPreviewLines = [
+  const pdfFileName = createPdfFileName(pdfTarget, selectedOrder);
+  const pdfPreviewLines = buildPdfPreview([
     `${company.name}`,
     "Rollladen- & Sonnenschutztechnik",
     "",
@@ -959,22 +713,75 @@ export default function App() {
     "UNTERSCHRIFTEN",
     "Monteur/Vorarbeiter: _______________________________",
     "Kunde/Auftraggeber: _______________________________",
-  ].join("\n");
+  ]);
   const savePdfDocument = () => { const doc = { id: `PDF-${Date.now()}`, orderId: selectedOrder?.id || "", customer: selectedOrder?.customer || "", template: pdfTarget, status: "erstellt", fileName: pdfFileName, createdAt: new Date().toLocaleString("de-DE"), text: pdfPreviewLines }; setPdfDocuments((docs) => [doc, ...docs]); addToSyncQueue("PDF-Dokument gespeichert", { orderId: selectedOrder?.id, template: pdfTarget }); showNotice("PDF-Dokument wurde dem Auftrag zugeordnet."); };
   const updatePdfDocumentStatus = (id, status) => setPdfDocuments((docs) => docs.map((doc) => doc.id === id ? { ...doc, status } : doc));
   const updateOrderById = (orderId, changes) => setOrders((list) => list.map((order) => order.id === orderId ? { ...order, ...changes, updatedAt: new Date().toLocaleString("de-DE") } : order));
-  const openCustomerOrder = (order) => { setSelectedOrderId(order.id); showNotice(`Auftrag ${order.id} geöffnet.`); if (role !== "kunde") setActive("orders"); };
-  const customerPortalAction = (action, order) => {
+  const openCustomerOrder = (order) => { setSelectedOrderId(order.id); showNotice(`Auftrag ${order.id} geöffnet.`); if (appRole !== "kunde") setActive("orders"); };
+  const confirmCustomerAppointment = (order) => {
     setSelectedOrderId(order.id);
-    if (action === "Termin bestätigen") { updateOrderById(order.id, { customerConfirmed: true, statusHistory: [...(order.statusHistory || []), { status: "Termin vom Kunden bestätigt", at: new Date().toLocaleString("de-DE"), by: currentPerson?.name || authUser?.name || "Kunde", note: "Bestätigung im Kundenportal" }] }); showNotice("Termin wurde bestätigt."); return; }
-    if (action === "Dokumente/PDFs prüfen") { setActive("pdf"); return; }
-    if (action === "Pflegehinweise ansehen") { setActive("maintenance"); return; }
-    showNotice(`${action} wurde als Kundenwunsch notiert.`);
+    const confirmedAt = new Date().toLocaleString("de-DE");
+    updateOrderById(order.id, {
+      customerConfirmed: true,
+      customerConfirmedAt: confirmedAt,
+      statusHistory: [...(order.statusHistory || []), { status: "Termin vom Kunden bestätigt", at: confirmedAt, by: currentPerson?.name || authUser?.name || "Kunde", note: "Bestätigung im Kundenportal" }],
+    });
+    addToSyncQueue("Kundentermin bestätigt", { orderId: order.id, confirmedAt });
+    showNotice(`Termin für Auftrag ${order.id} wurde bestätigt.`);
   };
   const showNotice = (message) => { setNotice(message); setTimeout(() => setNotice(""), 1600); };
-  const addToSyncQueue = (action, payload = {}) => setSyncQueue((queue) => [{ id: Date.now(), action, payload, status: offline ? "wartet offline" : "wartet auf Sync", createdAt: new Date().toLocaleString("de-DE") }, ...queue].slice(0, 50));
-  const markQueueSynced = () => setSyncQueue((queue) => queue.map((item) => ({ ...item, status: "synchronisiert", syncedAt: new Date().toLocaleString("de-DE") })).slice(0, 50));
-  const clearSyncedQueue = () => setSyncQueue((queue) => queue.filter((item) => item.status !== "synchronisiert"));
+  const addToSyncQueue = (action, payload = {}) => setSyncQueue((queue) => enqueueSyncItem(queue, action, payload, offline));
+  const queueLocalChange = () => setSyncQueue((queue) => replaceLocalChange(queue, offline));
+  const ensureSyncRetryQueued = (message) => setSyncQueue((queue) => ensureRetryQueued(queue, message, offline));
+  const markQueueSynced = (throughId) => setSyncQueue((queue) => markQueueItemsSynced(queue, throughId));
+  const savePartRequestDraft = () => {
+    const requestId = partRequest.id || `ET-${Date.now()}`;
+    const existing = partRequests.find((request) => request.id === requestId);
+    const photoChecklist = Object.fromEntries(PART_PHOTO_REQUIREMENTS.map((item) => [item, Boolean(partPhotoChecks[item])]));
+    const request = {
+      ...partRequest,
+      id: requestId,
+      draftKey: partRequest.draftKey || requestId,
+      orderId: partRequest.orderId || partRequestOrder?.id || "",
+      customer: partRequest.customer || partRequestOrder?.customer || "",
+      status: partRequest.status || "offen",
+      photoChecklist,
+      photoComplete: PART_PHOTO_REQUIREMENTS.every((item) => photoChecklist[item]),
+      requestText: buildPartRequestText(partRequest, partRequestOrder, photoChecklist),
+      createdAt: existing?.createdAt || new Date().toLocaleString("de-DE"),
+      updatedAt: new Date().toLocaleString("de-DE"),
+    };
+    setPartRequests((requests) => existing ? requests.map((item) => item.id === requestId ? request : item) : [request, ...requests]);
+    setPartRequest(request);
+    addToSyncQueue("Ersatzteil-Anfrage als Entwurf gespeichert", { requestId, orderId: request.orderId });
+    showNotice("Ersatzteil-Anfrage wurde lokal als Entwurf gespeichert.");
+  };
+  const loadPartRequestDraft = (request) => {
+    setPartRequest({ ...createEmptyPartRequest(), ...request, draftKey: request.draftKey || request.id });
+    if (request.orderId && orders.some((order) => order.id === request.orderId)) setSelectedOrderId(request.orderId);
+    showNotice(`Entwurf ${request.id} wurde geladen.`);
+  };
+  const newPartRequestDraft = () => {
+    setPartRequest(createEmptyPartRequest(selectedOrder));
+    showNotice("Neue Ersatzteil-Anfrage vorbereitet.");
+  };
+  const updatePartRequestStatus = (requestId, status) => {
+    setPartRequests((requests) => requests.map((request) => request.id === requestId ? { ...request, status, updatedAt: new Date().toLocaleString("de-DE") } : request));
+    setPartRequest((request) => request.id === requestId ? { ...request, status } : request);
+    addToSyncQueue("Ersatzteil-Status geändert", { requestId, status });
+    showNotice(`Status auf „${status}“ gesetzt. Es wurde keine E-Mail versendet.`);
+  };
+  const saveSketchRecord = (sketch) => {
+    setSavedSketches((current) => [sketch, ...(Array.isArray(current) ? current : [])].slice(0, 30));
+    setSketchImage(sketch.image);
+    addToSyncQueue("Skizze gespeichert", { sketchId: sketch.id, orderId: sketch.orderId || "" });
+    showNotice("Skizze wurde lokal gespeichert.");
+  };
+  const deleteSketchRecord = (sketch) => {
+    setSavedSketches((current) => (Array.isArray(current) ? current : []).filter((item) => item.id !== sketch.id));
+    addToSyncQueue("Skizze gelöscht", { sketchId: sketch.id, orderId: sketch.orderId || "" });
+    showNotice("Gespeicherte Skizze wurde gelöscht.");
+  };
   const addSyncLog = (action, status = "ok") => setSyncLog((log) => [{ id: Date.now(), action, status, timestamp: new Date().toLocaleString("de-DE"), user: authUser?.name || "System" }, ...log].slice(0, 20));
   const setBackendMessage = (message) => { setSupabaseStatus(message); setNotice(message); setTimeout(() => setNotice(""), 1800); };
   const requireSupabase = () => {
@@ -987,20 +794,12 @@ export default function App() {
   const rowToCompany = (row) => ({
     id: row.id,
     name: row.name,
-    adminCode: row.admin_code,
-    azubiCode: row.azubi_code,
-    customerCode: row.customer_code,
-    monteurCode: row.monteur_code,
     createdAt: row.created_at ? new Date(row.created_at).toLocaleString("de-DE") : company.createdAt,
   });
   const companyToRow = (data, userId) => ({
     id: data.id,
     name: data.name,
     owner_id: userId || null,
-    admin_code: data.adminCode,
-    azubi_code: data.azubiCode,
-    customer_code: data.customerCode,
-    monteur_code: data.monteurCode,
   });
   const personToRow = (person, companyId) => ({
     id: person.id,
@@ -1038,64 +837,117 @@ export default function App() {
     if (snapshot.measurementValues) setMeasurementValues(snapshot.measurementValues);
     if (snapshot.manualQuality) setManualQuality(snapshot.manualQuality);
     if (snapshot.photoAnalyses) setPhotoAnalyses(snapshot.photoAnalyses);
-    if (snapshot.syncQueue) setSyncQueue(snapshot.syncQueue);
     if (snapshot.pdfDocuments) setPdfDocuments(snapshot.pdfDocuments);
     if (snapshot.moduleChecks) setModuleChecks(snapshot.moduleChecks);
-    if (snapshot.sketchImage) setSketchImage(snapshot.sketchImage);
+    if (Array.isArray(snapshot.partRequests)) setPartRequests(snapshot.partRequests);
+    if (snapshot.learningProgress && typeof snapshot.learningProgress === "object") setLearningProgress(snapshot.learningProgress);
+    if (typeof snapshot.sketchImage === "string") setSketchImage(snapshot.sketchImage);
+    if (Array.isArray(snapshot.savedSketches)) setSavedSketches(snapshot.savedSketches);
     if (snapshot.orders?.[0]?.id) setSelectedOrderId(snapshot.orders[0].id);
   };
   const saveAppToSupabase = async (overrideCompany = null, options = {}) => {
-    if (!requireSupabase()) return;
+    if (!requireSupabase()) return false;
+    if (offline) {
+      ensureSyncRetryQueued("Offline");
+      return false;
+    }
+    if (syncInFlightRef.current) {
+      syncRetryRequestedRef.current = true;
+      return false;
+    }
+    const syncStartedAt = Date.now();
+    syncInFlightRef.current = true;
     try {
-      const { data: authData, error: authError } = await supabase.auth.getUser();
-      if (authError) throw authError;
-      if (!authData?.user) throw new Error("Bitte zuerst mit E-Mail oder persönlichem Code anmelden.");
       const activeCompany = overrideCompany || company;
       const snapshot = { ...createSnapshot(), company: activeCompany, companyPeople, orders, savedAt: new Date().toISOString() };
-      const { error: companyError } = await supabase.from("companies").upsert(companyToRow(activeCompany, authData.user.id));
-      if (companyError) throw companyError;
-      if (companyPeople.length) {
-        const { error: peopleError } = await supabase.from("company_people").upsert(companyPeople.map((person) => personToRow(person, activeCompany.id)));
-        if (peopleError) throw peopleError;
-      }
-      if (orders.length) {
-        const { error: ordersError } = await supabase.from("orders").upsert(orders.map((order) => ({ id: order.id, company_id: activeCompany.id, data: order, updated_at: new Date().toISOString() })));
-        if (ordersError) throw ordersError;
-      }
-      const { error: snapshotError } = await supabase.from("app_snapshots").upsert({ company_id: activeCompany.id, snapshot, updated_by: authData.user.id, updated_at: new Date().toISOString() });
-      if (snapshotError) throw snapshotError;
+      await withTimeout((async () => {
+        const { data: authData, error: authError } = await supabase.auth.getUser();
+        if (authError) throw authError;
+        if (!authData?.user) throw new Error("Bitte zuerst mit E-Mail oder persönlichem Code anmelden.");
+        const { error: companyError } = await supabase.from("companies").upsert(companyToRow(activeCompany, authData.user.id));
+        if (companyError) throw companyError;
+        if (companyPeople.length) {
+          const { error: peopleError } = await supabase.from("company_people").upsert(companyPeople.map((person) => personToRow(person, activeCompany.id)));
+          if (peopleError) throw peopleError;
+        }
+        if (orders.length) {
+          const { error: ordersError } = await supabase.from("orders").upsert(orders.map((order) => ({ id: order.id, company_id: activeCompany.id, data: order, updated_at: new Date().toISOString() })));
+          if (ordersError) throw ordersError;
+        }
+        const { error: snapshotError } = await supabase.from("app_snapshots").upsert({ company_id: activeCompany.id, snapshot, updated_by: authData.user.id, updated_at: new Date().toISOString() });
+        if (snapshotError) throw snapshotError;
+      })());
+      const syncedAt = new Date().toISOString();
+      setLastSyncedAt(syncedAt);
+      setSyncError("");
       addSyncLog(options.quiet ? "Auto-Sync gespeichert" : "Supabase gespeichert");
-      markQueueSynced();
-      if (options.quiet) {
-        const time = new Date().toLocaleTimeString("de-DE");
-        setSupabaseStatus(`Automatisch synchronisiert: ${time}`);
-        setAutoSyncStatus(`Cloud synchronisiert: ${time}`);
-      } else setBackendMessage("Daten wurden in Supabase gespeichert.");
+      markQueueSynced(syncStartedAt);
+      if (!options.quiet) setBackendMessage("Daten wurden in Supabase gespeichert.");
+      return true;
     } catch (error) {
       addSyncLog(`Supabase Fehler: ${error.message}`, "fehler");
-      if (options.quiet) {
-        setAutoSyncStatus("Cloud-Sync pausiert – lokale Speicherung aktiv.");
-        setSupabaseStatus("");
-      } else setBackendMessage(`Supabase Fehler: ${error.message}`);
+      setSyncError(error.message || "Cloud-Sync fehlgeschlagen.");
+      ensureSyncRetryQueued(error.message || "Cloud-Sync fehlgeschlagen");
+      if (!options.quiet) setBackendMessage("Sync fehlgeschlagen. Die App arbeitet lokal weiter.");
+      return false;
+    } finally {
+      syncInFlightRef.current = false;
+      if (syncRetryRequestedRef.current && !offline) {
+        syncRetryRequestedRef.current = false;
+        window.setTimeout(() => saveAppToSupabase(null, { quiet: true }), 500);
+      }
     }
   };
-  const loadAppFromSupabase = async (companyId = company.id) => {
-    if (!requireSupabase()) return;
+  const loadAppFromSupabase = async (companyId = company.id, targetRole = authUser?.role || appRole, targetPersonId = authUser?.personId) => {
+    if (!requireSupabase()) return false;
     try {
-      const { data: snap, error: snapError } = await supabase.from("app_snapshots").select("snapshot").eq("company_id", companyId).maybeSingle();
-      if (snapError) throw snapError;
-      if (snap?.snapshot) applyRemoteSnapshot(snap.snapshot);
-      const { data: remotePeople, error: peopleError } = await supabase.from("company_people").select("*").eq("company_id", companyId).order("created_at", { ascending: false });
-      if (peopleError) throw peopleError;
-      if (remotePeople?.length) setCompanyPeople(remotePeople.map(rowToPerson));
-      const { data: remoteOrders, error: ordersError } = await supabase.from("orders").select("*").eq("company_id", companyId).order("updated_at", { ascending: false });
-      if (ordersError) throw ordersError;
-      if (remoteOrders?.length) setOrders(remoteOrders.map((row) => row.data));
+      const isCustomerAccount = targetRole === "kunde";
+      const { snap, portalData, portalErrorMessage, remotePeople, remoteOrders } = await withTimeout((async () => {
+        let snap = null;
+        let portalData = null;
+        let portalErrorMessage = "";
+        if (isCustomerAccount) {
+          const { data, error } = await supabase.rpc("get_customer_portal_data", { p_company_id: companyId });
+          portalData = data || null;
+          portalErrorMessage = error?.message || "";
+        } else {
+          const { data, error: snapError } = await supabase.from("app_snapshots").select("snapshot").eq("company_id", companyId).maybeSingle();
+          if (snapError) throw snapError;
+          snap = data;
+        }
+        const { data: remotePeople, error: peopleError } = await supabase.from("company_people").select("*").eq("company_id", companyId).order("created_at", { ascending: false });
+        if (peopleError) throw peopleError;
+        let remoteOrders = [];
+        if (!isCustomerAccount) {
+          const { data, error: ordersError } = await supabase.from("orders").select("*").eq("company_id", companyId).order("updated_at", { ascending: false });
+          if (ordersError) throw ordersError;
+          remoteOrders = data || [];
+        }
+        return { snap, portalData, portalErrorMessage, remotePeople, remoteOrders };
+      })());
+      if (isCustomerAccount) {
+        const ownPeople = (remotePeople || []).filter((person) => person.id === targetPersonId);
+        setCompanyPeople(ownPeople.map(rowToPerson));
+        setOrders((localOrders) => (Array.isArray(portalData?.orders) ? portalData.orders : []).map((remoteOrder) => {
+          const localOrder = localOrders.find((order) => order.id === remoteOrder.id);
+          return localOrder?.customerConfirmed && !remoteOrder.customerConfirmed
+            ? { ...remoteOrder, customerConfirmed: true, customerConfirmedAt: localOrder.customerConfirmedAt || "lokal bestätigt" }
+            : remoteOrder;
+        }));
+        setPdfDocuments(Array.isArray(portalData?.pdfDocuments) ? portalData.pdfDocuments : []);
+      } else {
+        if (snap?.snapshot) applyRemoteSnapshot(snap.snapshot);
+        if (remotePeople?.length) setCompanyPeople(remotePeople.map(rowToPerson));
+        if (remoteOrders?.length) setOrders(remoteOrders.map((row) => row.data));
+      }
+      setLastSyncedAt(new Date().toISOString());
+      setSyncError(portalErrorMessage ? "Kundenportal konnte nicht sicher aus der Cloud geladen werden. Supabase-Schema aktualisieren." : "");
       addSyncLog("Supabase geladen");
-      setBackendMessage("Daten wurden aus Supabase geladen.");
+      return true;
     } catch (error) {
       addSyncLog(`Supabase Ladefehler: ${error.message}`, "fehler");
-      setAutoSyncStatus("Cloud-Laden übersprungen – lokale Daten aktiv.");
+      setSyncError(error.message || "Cloud-Daten konnten nicht geladen werden.");
+      return false;
     }
   };
   const loadCurrentCompanyFromSupabase = async () => {
@@ -1113,7 +965,7 @@ export default function App() {
       const user = { id: authData.user.id, personId: membership.id, name: membership.name, email: authData.user.email || `${membership.access_code}@code.local`, role: membership.role, company: nextCompany.name, companyId: nextCompany.id, loginType: authData.user.is_anonymous ? "code" : "email", loggedInAt: new Date().toLocaleString("de-DE") };
       setAuthUser(user);
       setRole(membership.role);
-      await loadAppFromSupabase(nextCompany.id);
+      await loadAppFromSupabase(nextCompany.id, membership.role, membership.id);
       setBackendMessage("Supabase-Account geladen.");
     } catch (error) {
       setBackendMessage(`Supabase Loginfehler: ${error.message}`);
@@ -1232,7 +1084,7 @@ export default function App() {
       const user = { id: result.auth_user_id || `LOGIN-${person.id}`, personId: person.id, name: person.name, email: `${person.accessCode.toLowerCase()}@code.local`, role: person.role, company: nextCompany.name, companyId: nextCompany.id, loginType: "supabase-code", loggedInAt: new Date().toLocaleString("de-DE") };
       setAuthUser(user);
       setRole(person.role);
-      await loadAppFromSupabase(nextCompany.id);
+      await loadAppFromSupabase(nextCompany.id, person.role, person.id);
       setActive("dashboard");
       setBackendMessage(`Angemeldet über Supabase als ${personRoleLabel(person.role)}.`);
       return true;
@@ -1241,24 +1093,23 @@ export default function App() {
       return false;
     }
   };
-  const logoutSupabase = async () => {
-    if (supabase) await supabase.auth.signOut();
+  const logoutSupabase = () => {
     setAuthUser(null);
     setInitialCloudLoaded(false);
-    setAutoSyncStatus("Wartet auf Login");
+    setSyncError("");
     setActive("dashboard");
     addSyncLog("Supabase Logout");
     setBackendMessage("Abgemeldet.");
+    if (supabase) supabase.auth.signOut().catch(() => {});
   };
 
   const roleLabel = (roleId) => roles.find((r) => r.id === roleId)?.label || roleId;
   const personRoleLabel = (roleId) => teamRoleOptions.find((r) => r.id === roleId)?.label || roleLabel(roleId);
   const teamMembers = companyPeople.filter((p) => p.role !== "kunde");
   const companyCustomers = companyPeople.filter((p) => p.role === "kunde");
-  const filteredCompanyPeople = companyPeople.filter((p) => [p.name, p.role, p.accessCode, p.status, p.team, p.address, p.phone].join(" ").toLowerCase().includes(teamSearch.toLowerCase()));
   const createCompanyPerson = () => {
     if (!personForm.name.trim()) { showNotice("Bitte Namen eintragen."); return; }
-    const option = teamRoleOptions.find((r) => r.id === personForm.role) || teamRoleOptions[1];
+    const option = teamRoleOptions.find((item) => item.id === personForm.role) || teamRoleOptions.find((item) => item.id === "monteur") || teamRoleOptions[0];
     const person = {
       id: `P-${Date.now()}`,
       name: personForm.name.trim(),
@@ -1269,26 +1120,53 @@ export default function App() {
       address: personForm.address,
       team: personForm.role === "kunde" ? "" : personForm.team,
       trainingYear: personForm.role === "azubi" ? personForm.trainingYear : "",
-      progress: personForm.role === "azubi" ? 0 : 0,
+      progress: 0,
       createdAt: new Date().toLocaleString("de-DE"),
     };
     setCompanyPeople((list) => [person, ...list]);
     setPersonForm({ name: "", role: "monteur", phone: "", address: "", team: "Kolonne 1", trainingYear: "1" });
+    addToSyncQueue("team.person.created", { personId: person.id });
     showNotice(`${personRoleLabel(person.role)} wurde erstellt. Code: ${person.accessCode}`);
+  };
+  const updateCompanyPerson = (personId, changes) => {
+    setCompanyPeople((list) => list.map((person) => person.id === personId ? {
+      ...person,
+      ...changes,
+      team: changes.role === "kunde" ? "" : changes.team,
+      trainingYear: changes.role === "azubi" ? changes.trainingYear : "",
+      updatedAt: new Date().toLocaleString("de-DE"),
+    } : person));
+    addToSyncQueue("team.person.updated", { personId });
+    showNotice("Person wurde aktualisiert.");
   };
   const regeneratePersonCode = (personId) => {
     setCompanyPeople((list) => list.map((p) => {
       if (p.id !== personId) return p;
-      const option = teamRoleOptions.find((r) => r.id === p.role) || teamRoleOptions[1];
-      return { ...p, accessCode: makeCode(option.prefix) };
+      const option = teamRoleOptions.find((item) => item.id === p.role) || teamRoleOptions.find((item) => item.id === "monteur") || teamRoleOptions[0];
+      return { ...p, accessCode: makeCode(option.prefix), updatedAt: new Date().toLocaleString("de-DE") };
     }));
+    addToSyncQueue("team.person.code-regenerated", { personId });
     showNotice("Persönlicher Code wurde neu generiert.");
   };
-  const setPersonStatus = (personId, status) => setCompanyPeople((list) => list.map((p) => p.id === personId ? { ...p, status } : p));
-  const deletePerson = (personId) => {
-    setCompanyPeople((list) => list.filter((p) => p.id !== personId));
-    setOrders((list) => list.map((o) => ({ ...o, assignedMemberIds: (o.assignedMemberIds || []).filter((id) => id !== personId), customerPersonId: o.customerPersonId === personId ? "" : o.customerPersonId })));
-    showNotice("Person wurde entfernt.");
+  const setPersonStatus = (personId, status) => {
+    setCompanyPeople((list) => list.map((person) => person.id === personId ? {
+      ...person,
+      status,
+      archivedAt: status === "archiviert" ? person.archivedAt : "",
+      updatedAt: new Date().toLocaleString("de-DE"),
+    } : person));
+    addToSyncQueue("team.person.status", { personId, status });
+    showNotice(status === "aktiv" ? "Zugang wurde aktiviert." : "Zugang wurde deaktiviert.");
+  };
+  const archivePerson = (personId) => {
+    setCompanyPeople((list) => list.map((person) => person.id === personId ? {
+      ...person,
+      status: "archiviert",
+      archivedAt: new Date().toISOString(),
+      updatedAt: new Date().toLocaleString("de-DE"),
+    } : person));
+    addToSyncQueue("team.person.archived", { personId });
+    showNotice("Person wurde archiviert. Bestehende Auftragszuweisungen bleiben erhalten.");
   };
   const loginWithPersonalCode = async () => {
     if (isSupabaseConfigured && supabase) {
@@ -1308,10 +1186,6 @@ export default function App() {
     setActive("dashboard");
     addSyncLog(`Code-Login lokal: ${person.name}`);
     showNotice(`Angemeldet als ${personRoleLabel(person.role)}.`);
-  };
-  const regenerateCompanyCode = (key, prefix) => {
-    setCompany((current) => ({ ...current, [key]: makeCode(prefix) }));
-    showNotice("Firmen-Code wurde neu generiert.");
   };
   const toggleAssignment = (personId) => {
     if (!selectedOrder) return;
@@ -1335,17 +1209,19 @@ export default function App() {
   const duplicateSelectedOrder = () => { if (!selectedOrder) return; const id = `A-${Math.floor(1000 + Math.random() * 9000)}`; const stamp = new Date().toLocaleString("de-DE"); const copy = { ...selectedOrder, id, status: "offen", createdAt: stamp, updatedAt: stamp, notes: `${selectedOrder.notes || ""}
 Kopie/Nachfolgeauftrag aus ${selectedOrder.id}`.trim(), statusHistory: [{ status: "offen", at: stamp, by: authUser?.name || "System", note: `Dupliziert aus ${selectedOrder.id}` }] }; setOrders((list) => [copy, ...list]); setSelectedOrderId(id); setChecks((current) => ({ ...current, [id]: buildEmptyChecklist(copy.product, copy) })); addToSyncQueue("Auftrag dupliziert", { from: selectedOrder.id, to: id }); showNotice("Auftrag wurde dupliziert."); };
   const archiveSelectedOrder = () => updateSelectedOrderStatus("archiviert", "Auftrag archiviert");
-  const createReworkOrder = () => { if (!selectedOrder) return; const id = `A-${Math.floor(1000 + Math.random() * 9000)}`; const stamp = new Date().toLocaleString("de-DE"); const rework = { ...selectedOrder, id, status: "offen", priority: "dringend", orderType: "Nacharbeit", createdAt: stamp, updatedAt: stamp, notes: `Nacharbeit zu ${selectedOrder.id}: offene Punkte prüfen, Fotos ergänzen und Kunden informieren.`, statusHistory: [{ status: "offen", at: stamp, by: authUser?.name || "System", note: `Nacharbeit aus ${selectedOrder.id} erstellt` }] }; setOrders((list) => [rework, ...list]); setSelectedOrderId(id); setChecks((current) => ({ ...current, [id]: buildEmptyChecklist(rework.product, rework) })); addToSyncQueue("Nacharbeit erstellt", { from: selectedOrder.id, to: id }); showNotice("Nacharbeit wurde angelegt."); };
+  const createReworkOrder = (options = {}) => { if (!selectedOrder) return; const sourceOrder = selectedOrder; const id = `A-${Math.floor(1000 + Math.random() * 9000)}`; const stamp = new Date().toLocaleString("de-DE"); const rework = { ...sourceOrder, id, parentOrderId: sourceOrder.id, reworkOrderId: "", status: "offen", priority: "dringend", orderType: "Nacharbeit", createdAt: stamp, updatedAt: stamp, notes: `Nacharbeit zu ${sourceOrder.id}: offene Punkte prüfen, Fotos ergänzen und Kunden informieren.`, statusHistory: [{ status: "offen", at: stamp, by: authUser?.name || "System", note: `Nacharbeit aus ${sourceOrder.id} erstellt` }] }; setOrders((list) => [rework, ...list.map((order) => order.id === sourceOrder.id ? { ...order, reworkOrderId: id, updatedAt: stamp, statusHistory: [...(order.statusHistory || []), { status: order.status, at: stamp, by: authUser?.name || "System", note: `Nacharbeitsauftrag ${id} angelegt` }] } : order)]); if (!options.keepSourceSelected) setSelectedOrderId(id); setChecks((current) => ({ ...current, [id]: buildEmptyChecklist(rework.product, rework) })); addToSyncQueue("Nacharbeit erstellt", { from: sourceOrder.id, to: id }); showNotice(`Nacharbeitsauftrag ${id} wurde angelegt.`); };
+  const startPartRequestForSelectedOrder = () => { if (!selectedOrder) return; const stamp = new Date().toLocaleString("de-DE"); setPartRequest(createEmptyPartRequest(selectedOrder)); setOrders((list) => list.map((order) => order.id === selectedOrder.id ? { ...order, partRequestStartedAt: stamp, updatedAt: stamp } : order)); addToSyncQueue("Ersatzteil-Anfrage gestartet", { orderId: selectedOrder.id }); setActive("parts"); showNotice("Ersatzteil-Anfrage für den Auftrag wurde vorbereitet."); };
   const createOrderFromWorkflowTemplate = () => { const t = selectedWorkflowTemplate; const id = `A-${Math.floor(1000 + Math.random() * 9000)}`; const stamp = new Date().toLocaleString("de-DE"); const order = { id, customer: "Neuer Kunde", contact: "", phone: "", email: "", address: "", date: todayIso(), time: "08:00", assignedTo: "", product: t.product, substrate: "Beton", drive: "Funkmotor", installType: "Renovierung", windCritical: false, status: "offen", priority: "normal", orderType: t.orderType, notes: t.notes, createdAt: stamp, updatedAt: stamp, statusHistory: [{ status: "offen", at: stamp, by: authUser?.name || "System", note: `Aus Vorlage ${t.name} erstellt` }] }; setOrders((list) => [order, ...list]); setSelectedOrderId(id); setChecks((current) => ({ ...current, [id]: buildEmptyChecklist(order.product, order) })); setActive("orders"); addToSyncQueue("Auftrag aus Vorlage erstellt", { template: t.id, orderId: id }); showNotice(`Vorlage erstellt: ${t.name}`); };
   const toggleCheck = (orderId, item) => { setChecks((current) => ({ ...current, [orderId]: { ...(current[orderId] || {}), [item]: !(current[orderId]?.[item]) } })); addToSyncQueue("Checkliste geändert", { orderId, item }); };
   const setMeasurementField = (field, value) => { setMeasurementValues((current) => ({ ...current, [selectedOrder?.id]: { ...(current[selectedOrder?.id] || {}), [field]: value } })); addToSyncQueue("Aufmaß geändert", { orderId: selectedOrder?.id, field }); };
   const uploadPhoto = (id, file) => { if (!file) return; setPhotos((p) => ({ ...p, [id]: { name: file.name, url: URL.createObjectURL(file) } })); addToSyncQueue("Foto hinzugefügt", { orderId: selectedOrder?.id, photoType: id, fileName: file.name }); };
-  const toggleQuality = (id) => { setManualQuality((current) => ({ ...current, [selectedOrder?.id]: { ...(current[selectedOrder?.id] || {}), [id]: !current[selectedOrder?.id]?.[id] } })); addToSyncQueue("Qualitätsprüfung geändert", { orderId: selectedOrder?.id, id }); };
-  const completeSelectedOrder = () => { if (!selectedOrder || !closeReady) return; updateSelectedOrder({ status: "erledigt" }); setActive("dashboard"); };
+  const toggleQuality = (id) => { if (!selectedOrder) return; setManualQuality((current) => ({ ...current, [selectedOrder.id]: { ...(current[selectedOrder.id] || {}), [id]: !current[selectedOrder.id]?.[id] } })); addToSyncQueue("Abschlussprüfung geändert", { orderId: selectedOrder.id, id }); };
+  const setQualityValue = (id, value) => { if (!selectedOrder) return; setManualQuality((current) => ({ ...current, [selectedOrder.id]: { ...(current[selectedOrder.id] || {}), [id]: value } })); addToSyncQueue("Abschlussentscheidung geändert", { orderId: selectedOrder.id, id, value }); };
+  const completeSelectedOrder = () => { if (!selectedOrder) return; if (!closeReady) { showNotice(`${unresolvedQuality.length} Pflichtpunkt${unresolvedQuality.length === 1 ? " fehlt" : "e fehlen"}.`); return; } updateSelectedOrderStatus("erledigt", "Abschlussprüfung vollständig"); };
   const applyReportTemplate = () => { setReportText(selectedReportTemplate.text); showNotice("Vorlage wurde übernommen."); };
   const importChecklistIntoReport = () => { const text = reportCheckedItems.length ? `Erledigte Checklistenpunkte: ${reportCheckedItems.join(", ")}.` : `Beim Auftrag ${selectedOrder?.id || ""} wurden noch keine Checklistenpunkte abgehakt.`; setReportText((current) => `${current}\n${text}`.trim()); showNotice("Checkliste wurde übernommen."); };
   const addPhotoNoteToReport = () => { const photoNames = Object.keys(photos); const text = photoNames.length ? `Fotodokumentation erstellt: ${photoNames.join(", ")}.` : "Fotodokumentation wurde vorbereitet, aber noch keine Fotos hinzugefügt."; setReportText((current) => `${current}\n${text}`.trim()); showNotice("Foto-Notiz eingefügt."); };
-  const saveReportEntry = () => { const entry = { id: Date.now(), mode: reportMode, status: reportStatus, text: reportProposal, orderId: selectedOrder?.id || "", createdAt: new Date().toLocaleString("de-DE"), masterComment: reportMasterComment }; setSavedReports((entries) => [entry, ...entries]); showNotice("Berichtsheft-Eintrag gespeichert."); };
+  const saveReportEntry = () => { const entry = { id: Date.now(), mode: reportMode, status: reportStatus, text: reportProposal, orderId: selectedOrder?.id || "", createdAt: new Date().toLocaleString("de-DE"), createdBy: currentPerson?.id || authUser?.id || "", userName: currentPerson?.name || authUser?.name || "", masterComment: reportMasterComment }; setSavedReports((entries) => [entry, ...entries]); showNotice("Berichtsheft-Eintrag gespeichert."); };
   const generateWeeklyReport = () => { const weekOrders = orders.slice(0, 5); const text = `Wochenbericht automatisch erstellt. Berücksichtigte Aufträge: ${weekOrders.map((order) => `${order.id} ${productTypes.find((p) => p.id === order.product)?.name || "Produkt"} bei ${order.customer}`).join("; ")}. Schwerpunkte waren Aufmaß, Montagevorbereitung, Checklistenbearbeitung, Funktionsprüfung, Dokumentation und Kundenkommunikation.`; setReportMode("Wochenbericht"); setReportText(text); showNotice("Wochenbericht erzeugt."); };
   const exportCurrentReport = () => { const text = `BERICHTSHEFT-EXPORT\nDatum: ${new Date().toLocaleString("de-DE")}\nStatus: ${reportStatus}\nAuftrag: ${selectedOrder?.id || ""}\n\n${reportProposal}\n\nMeister-Kommentar:\n${reportMasterComment || "-"}`; setReportExportText(text); setBackupText(text); showNotice("Export erzeugt."); };
   const approveLatestReport = () => { if (!savedReports[0]) { showNotice("Es gibt noch keinen gespeicherten Bericht."); return; } setSavedReports((entries) => entries.map((entry, index) => index === 0 ? { ...entry, status: "Freigegeben", masterComment: reportMasterComment || entry.masterComment || "Freigegeben." } : entry)); setReportStatus("Freigegeben"); showNotice("Letzter Bericht freigegeben."); };
@@ -1353,13 +1229,13 @@ Kopie/Nachfolgeauftrag aus ${selectedOrder.id}`.trim(), statusHistory: [{ status
   const addNote = () => { if (!favorite.trim()) return; setNotes((n) => [{ id: Date.now(), text: favorite, module: active }, ...n]); setFavorite(""); };
   const runPhotoAnalysis = (label) => { const analysis = photos[label] ? `${label}: Foto '${photos[label].name}' wurde Auftrag ${selectedOrder?.id || "ohne Auftrag"} zugeordnet. Vorschlag: im Protokoll verwenden und beim Abschluss prüfen.` : `${label}: Noch kein Foto vorhanden.`; setPhotoAnalyses((current) => ({ ...current, [label]: analysis })); };
   const generateKiAnswer = () => { const warnings = []; if (selectedOrder?.substrate === "WDVS") warnings.push("WDVS-Abstandsmontage und Abdichtung prüfen"); if (selectedOrder?.drive?.includes("Funk")) warnings.push("Senderkanal, Reichweite und Gruppensteuerung testen"); if (selectedOrder?.windCritical) warnings.push("Windklasse, Sensorik und Kundenhinweis dokumentieren"); setGeneratedAiResponse(`Prüfvorschlag für ${selectedOrder?.id || "aktuellen Auftrag"}: Produkt ${selectedProduct.name}, Untergrund ${selectedOrder?.substrate || "unbekannt"}, Antrieb ${selectedOrder?.drive || "unbekannt"}. Nächste Schritte: Aufmaß prüfen, Checkliste öffnen, Fotos ergänzen, ${warnings.length ? warnings.join("; ") : "Standardprüfung durchführen"}, Abschlussprüfung öffnen.`); };
-  const createSnapshot = () => ({ version: "1.4-werkstatt", exportedAt: new Date().toISOString(), authUser, company, companyPeople, orders, checks, notes, savedReports, measurementValues, manualQuality, photoAnalyses, syncQueue, pdfDocuments, moduleChecks, sketchImage });
+  const createSnapshot = () => ({ version: "1.7-ersatzteile", exportedAt: new Date().toISOString(), authUser, company, companyPeople, orders, checks, notes, savedReports, measurementValues, manualQuality, photoAnalyses, pdfDocuments, moduleChecks, partRequests, learningProgress, sketchImage, savedSketches });
     const pushToCloud = () => { const snapshot = createSnapshot(); saveJson(`rs-cloud-${cloudCompanyId}`, snapshot); setBackupText(JSON.stringify(snapshot, null, 2)); addSyncLog("Daten im lokalen Cloud-Snapshot gespeichert"); };
-  const pullFromCloud = () => { const snapshot = loadJson(`rs-cloud-${cloudCompanyId}`, null); if (!snapshot) { addSyncLog("Kein lokaler Cloud-Snapshot gefunden", "fehlt"); return; } setOrders(snapshot.orders || []); setChecks(snapshot.checks || {}); setNotes(snapshot.notes || []); setSavedReports(snapshot.savedReports || []); setMeasurementValues(snapshot.measurementValues || {}); setManualQuality(snapshot.manualQuality || {}); setPhotoAnalyses(snapshot.photoAnalyses || {}); setCompany(snapshot.company || defaultCompany()); setCompanyPeople(snapshot.companyPeople || defaultCompanyPeople()); setSyncQueue(snapshot.syncQueue || []); setPdfDocuments(snapshot.pdfDocuments || []); addSyncLog("Daten aus lokalem Cloud-Snapshot geladen"); };
+  const pullFromCloud = () => { const snapshot = loadJson(`rs-cloud-${cloudCompanyId}`, null); if (!snapshot) { addSyncLog("Kein lokaler Cloud-Snapshot gefunden", "fehlt"); return; } setOrders(snapshot.orders || []); setChecks(snapshot.checks || {}); setNotes(snapshot.notes || []); setSavedReports(snapshot.savedReports || []); setMeasurementValues(snapshot.measurementValues || {}); setManualQuality(snapshot.manualQuality || {}); setPhotoAnalyses(snapshot.photoAnalyses || {}); setCompany(snapshot.company || defaultCompany()); setCompanyPeople(snapshot.companyPeople || defaultCompanyPeople()); setSyncQueue(snapshot.syncQueue || []); setPdfDocuments(snapshot.pdfDocuments || []); setPartRequests(snapshot.partRequests || []); setLearningProgress(snapshot.learningProgress || {}); setSketchImage(snapshot.sketchImage || ""); setSavedSketches(snapshot.savedSketches || []); addSyncLog("Daten aus lokalem Cloud-Snapshot geladen"); };
   const exportBackup = () => { const text = JSON.stringify(createSnapshot(), null, 2); setBackupText(text); addSyncLog("Backup erzeugt"); };
-  const importBackup = () => { try { const snapshot = JSON.parse(backupText); setOrders(snapshot.orders || []); setChecks(snapshot.checks || {}); setNotes(snapshot.notes || []); setSavedReports(snapshot.savedReports || []); setMeasurementValues(snapshot.measurementValues || {}); setManualQuality(snapshot.manualQuality || {}); setPhotoAnalyses(snapshot.photoAnalyses || {}); setCompany(snapshot.company || defaultCompany()); setCompanyPeople(snapshot.companyPeople || defaultCompanyPeople()); setSyncQueue(snapshot.syncQueue || []); setPdfDocuments(snapshot.pdfDocuments || []); addSyncLog("Backup importiert"); } catch { addSyncLog("Backup konnte nicht gelesen werden", "fehler"); } };
+  const importBackup = () => { try { const snapshot = JSON.parse(backupText); setOrders(snapshot.orders || []); setChecks(snapshot.checks || {}); setNotes(snapshot.notes || []); setSavedReports(snapshot.savedReports || []); setMeasurementValues(snapshot.measurementValues || {}); setManualQuality(snapshot.manualQuality || {}); setPhotoAnalyses(snapshot.photoAnalyses || {}); setCompany(snapshot.company || defaultCompany()); setCompanyPeople(snapshot.companyPeople || defaultCompanyPeople()); setSyncQueue(snapshot.syncQueue || []); setPdfDocuments(snapshot.pdfDocuments || []); setPartRequests(snapshot.partRequests || []); setLearningProgress(snapshot.learningProgress || {}); setSketchImage(snapshot.sketchImage || ""); setSavedSketches(snapshot.savedSketches || []); addSyncLog("Backup importiert"); } catch { addSyncLog("Backup konnte nicht gelesen werden", "fehler"); } };
 
-  const screen = (content) => <motion.main initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}>{content}</motion.main>;
+  const screen = (content) => canOpenModule(active) ? <motion.main initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}>{content}</motion.main> : null;
 
   useEffect(() => {
     if (!isSupabaseConfigured || !supabase) return;
@@ -1387,44 +1263,37 @@ Kopie/Nachfolgeauftrag aus ${selectedOrder.id}`.trim(), statusHistory: [{ status
   useEffect(() => {
     if (!authUser) {
       setInitialCloudLoaded(false);
-      setAutoSyncStatus("Wartet auf Login");
+      setSyncError("");
       return;
     }
     if (offline) {
       setInitialCloudLoaded(true);
-      setAutoSyncStatus("Offline erkannt – Cloud-Laden pausiert.");
       return;
     }
     if (!isSupabaseConfigured || !supabase) {
       setInitialCloudLoaded(true);
-      setAutoSyncStatus("Supabase nicht verbunden");
       return;
     }
     let cancelled = false;
-    setAutoSyncStatus("Lade Cloud-Daten ...");
     const timer = window.setTimeout(async () => {
-      await loadAppFromSupabase(authUser.companyId || company.id);
-      if (!cancelled) {
-        setInitialCloudLoaded(true);
-        setAutoSyncStatus(`Cloud geladen: ${new Date().toLocaleTimeString("de-DE")}`);
-      }
+      await loadAppFromSupabase(authUser.companyId || company.id, authUser.role, authUser.personId);
+      if (!cancelled) setInitialCloudLoaded(true);
     }, 250);
     return () => { cancelled = true; window.clearTimeout(timer); };
   }, [authUser?.id, authUser?.companyId, offline]);
 
-  useEffect(() => {
-    if (!authUser || !initialCloudLoaded || !autoSyncEnabled || !isSupabaseConfigured || !supabase) return;
-    if (offline) {
-      setAutoSyncStatus("Offline erkannt – Änderungen bleiben lokal und werden später synchronisiert.");
-      return;
-    }
-    setAutoSyncStatus("Änderung erkannt – Cloud-Sync wartet kurz ...");
-    const timer = window.setTimeout(() => {
-      setAutoSyncStatus("Speichere in der Cloud ...");
-      saveAppToSupabase(null, { quiet: true });
-    }, 4500);
-    return () => window.clearTimeout(timer);
-  }, [authUser?.id, authUser?.companyId, initialCloudLoaded, autoSyncEnabled, offline, company, companyPeople, orders, checks, notes, savedReports, measurementValues, manualQuality, photoAnalyses]);
+  const syncOwnerKey = authUser ? `${authUser.id}:${authUser.companyId || company.id}` : "";
+  const syncChangeToken = useMemo(() => ({}), [company, companyPeople, orders, checks, notes, savedReports, measurementValues, manualQuality, photoAnalyses, pdfDocuments, moduleChecks, partRequests, learningProgress, sketchImage, savedSketches]);
+  useAutoSync({
+    ownerKey: syncOwnerKey,
+    ready: initialCloudLoaded,
+    enabled: Boolean(isSupabaseConfigured && supabase && authUser?.role !== "kunde"),
+    offline,
+    pendingVersion: pendingSyncVersion,
+    changeToken: syncChangeToken,
+    onLocalChange: queueLocalChange,
+    onSync: () => saveAppToSupabase(null, { quiet: true }),
+  });
 
   if (!authUser) {
     return <LoginGate
@@ -1448,72 +1317,35 @@ Kopie/Nachfolgeauftrag aus ${selectedOrder.id}`.trim(), statusHistory: [{ status
     />;
   }
 
-  return <div className={`min-h-screen bg-gradient-to-br from-slate-50 via-white to-slate-100 text-slate-950 ${device.isMobile ? "p-3 pb-24" : "p-4 md:p-8"}`}><div className="mx-auto max-w-7xl"><TopBar role={role} setRole={setRole} offline={offline} compact={device.isMobile} currentUser={authUser} onLogout={logoutSupabase} />{notice && <div className="mb-4 rounded-2xl bg-emerald-50 p-3 text-sm font-bold text-emerald-800">{notice}</div>}<div className="mb-4 rounded-3xl border border-slate-200 bg-white p-4 shadow-sm"><p className="text-xs font-bold uppercase text-slate-500">Automatische Speicherung</p><p className="mt-1 text-sm font-bold text-slate-700">{offline ? "Offline erkannt – Änderungen werden lokal gespeichert." : autoSyncStatus}</p></div><Header role={role} orders={visibleOrders} selectedOrder={selectedOrder} offline={offline} compact={device.isMobile} />{!device.isMobile && <nav className="mb-6 grid grid-cols-2 gap-3 md:grid-cols-5 xl:grid-cols-8">{allowedNav.map(({ id, label, icon: Icon }) => <button key={id} onClick={() => setActive(id)} className={`flex items-center justify-center gap-2 rounded-2xl px-3 py-3 text-sm font-bold shadow-sm transition ${active === id ? "bg-slate-950 text-white" : "bg-white text-slate-700 hover:bg-slate-100"}`}><Icon size={17} />{label}</button>)}</nav>}{device.isMobile && <MobileBottomNav items={allowedNav} active={active} setActive={setActive} />}
-
-  {active === "dashboard" && screen(<div className="space-y-5">
-    <Card>
-      <SectionTitle icon={Home} title={roleHome.title} subtitle={roleHome.subtitle} />
-      <div className="grid gap-3 md:grid-cols-4">
-        <div className="rounded-3xl bg-slate-50 p-4"><p className="text-3xl font-black">{activeOrders.length}</p><p className="text-sm text-slate-600">aktive Aufträge</p></div>
-        <div className="rounded-3xl bg-slate-50 p-4"><p className="text-3xl font-black">{todaysOrders.length}</p><p className="text-sm text-slate-600">heute geplant</p></div>
-        <div className="rounded-3xl bg-slate-50 p-4"><p className="text-3xl font-black">{openReports.length}</p><p className="text-sm text-slate-600">offene Berichte</p></div>
-        <div className="rounded-3xl bg-slate-50 p-4"><p className="text-3xl font-black">{syncQueue.filter((item) => item.status !== "synchronisiert").length}</p><p className="text-sm text-slate-600">wartet auf Sync</p></div>
-      </div>
-      <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-4">{roleHome.focus.map((item) => <div key={item} className="rounded-2xl bg-slate-950 p-4 text-sm font-bold text-white">{item}</div>)}</div>
-    </Card>
-    <div className="grid gap-5 lg:grid-cols-[1.1fr_0.9fr]">
-      <Card><SectionTitle icon={BriefcaseBusiness} title={role === "kunde" ? "Meine Aufträge" : role === "azubi" ? "Meine Baustellen & Lernen" : "Nächste Baustellen"} subtitle="Rollenabhängige Übersicht mit den wichtigsten nächsten Aktionen." />
-        <div className="grid gap-3 md:grid-cols-2">{visibleOrders.slice(0, 4).map((o) => <button key={o.id} onClick={() => { setSelectedOrderId(o.id); setActive(role === "kunde" ? "portal" : "orders"); }} className="rounded-3xl bg-slate-50 p-4 text-left hover:bg-white hover:shadow-md"><div className="flex items-center justify-between"><strong>{o.id}</strong><Badge>{o.status}</Badge></div><p className="mt-2 font-bold">{o.customer}</p><p className="text-sm text-slate-600">{o.date} {o.time} · {o.address || "ohne Adresse"}</p><p className="mt-2 text-xs text-slate-500">{productTypes.find((p) => p.id === o.product)?.name}</p></button>)}</div>
-        {visibleOrders.length === 0 && <div className="rounded-3xl bg-slate-50 p-5 text-sm font-bold text-slate-600">Für diese Rolle sind noch keine passenden Aufträge zugewiesen.</div>}
-      </Card>
-      <Card><SectionTitle icon={CheckCircle2} title="Schnellaktionen" subtitle="Direkt in den passenden Arbeitsbereich springen." />
-        <div className="grid gap-3 md:grid-cols-2">
-          {role !== "kunde" && <button onClick={() => setActive("checklists")} className="rounded-2xl bg-slate-100 px-4 py-3 text-sm font-bold">Checkliste öffnen</button>}
-          {role !== "kunde" && <button onClick={() => setActive("photos")} className="rounded-2xl bg-slate-100 px-4 py-3 text-sm font-bold">Fotos ergänzen</button>}
-          {role !== "kunde" && <button onClick={() => setActive("closeOrder")} className="rounded-2xl bg-slate-100 px-4 py-3 text-sm font-bold">Abschluss prüfen</button>}
-          {role === "azubi" && <button onClick={() => setActive("azubiPlan")} className="rounded-2xl bg-emerald-100 px-4 py-3 text-sm font-bold text-emerald-800">Lernplan öffnen</button>}
-          {role === "kunde" && <button onClick={() => setActive("portal")} className="rounded-2xl bg-slate-950 px-4 py-3 text-sm font-bold text-white">Kundenportal öffnen</button>}
-          {isCompanyAdmin && <button onClick={() => setActive("planning")} className="rounded-2xl bg-slate-950 px-4 py-3 text-sm font-bold text-white">Baustellen planen</button>}
-          {isCompanyAdmin && <button onClick={() => setActive("company")} className="rounded-2xl bg-slate-100 px-4 py-3 text-sm font-bold">Team verwalten</button>}
-          <button onClick={() => setActive("pdf")} className="rounded-2xl bg-slate-100 px-4 py-3 text-sm font-bold">PDF vorbereiten</button>
-        </div>
-      </Card>
-    </div>
-  </div>)}
+  return <div className={`min-h-screen bg-gradient-to-br from-slate-50 via-white to-slate-100 text-slate-950 ${device.isMobile ? "p-3 pb-24" : "p-4 md:p-8"}`}><div className="mx-auto max-w-7xl"><TopBar role={appRole} setRole={setRole} offline={offline} pendingSyncCount={pendingSyncCount} lastSyncedAt={lastSyncedAt} syncError={syncError} compact={device.isMobile} currentUser={authUser} onLogout={logoutSupabase} />{notice && <div className="mb-4 rounded-2xl bg-emerald-50 p-3 text-sm font-bold text-emerald-800">{notice}</div>}<Header role={appRole} orders={visibleOrders} selectedOrder={selectedOrder} compact={device.isMobile} moduleCount={allowedNav.length} />{!device.isMobile && <nav className="mb-6 grid grid-cols-2 gap-3 md:grid-cols-5 xl:grid-cols-8">{allowedNav.map(({ id, label, icon: Icon }) => <button key={id} onClick={() => setActive(id)} className={`flex items-center justify-center gap-2 rounded-2xl px-3 py-3 text-sm font-bold shadow-sm transition ${active === id ? "bg-slate-950 text-white" : "bg-white text-slate-700 hover:bg-slate-100"}`}><Icon size={17} />{label}</button>)}</nav>}{device.isMobile && <MobileBottomNav items={allowedNav} active={active} setActive={setActive} />}
+    {active === "dashboard" && screen(<DashboardPage activeOrders={activeOrders} allowedNav={allowedNav} appRole={appRole} canOpenModule={canOpenModule} company={company} learningDashboard={learningDashboard} openReports={openReports} orders={orders} photos={photos} roleHome={roleHome} setActive={setActive} setSelectedOrderId={setSelectedOrderId} todaysOrders={todaysOrders} visibleOrders={visibleOrders} />)}
     {active === "today" && screen(<div className="grid gap-5 lg:grid-cols-[1fr_0.8fr]"><Card><SectionTitle icon={ClipboardList} title="Heute / Tagesplanung" subtitle="Heutige Aufträge, offene Berichte und Schnellaktionen." /><div className="grid gap-3 md:grid-cols-3"><div className="rounded-3xl bg-slate-50 p-4"><p className="text-3xl font-black">{todaysOrders.length}</p><p className="text-sm text-slate-600">heutige Aufträge</p></div><div className="rounded-3xl bg-slate-50 p-4"><p className="text-3xl font-black">{openReports.length}</p><p className="text-sm text-slate-600">offene Berichte</p></div><div className="rounded-3xl bg-slate-50 p-4"><p className="text-3xl font-black">{Object.keys(photos).length}</p><p className="text-sm text-slate-600">Fotos</p></div></div><div className="mt-5 space-y-3">{todaysOrders.length === 0 && <div className="rounded-2xl bg-slate-50 p-4 text-sm font-bold text-slate-600">Heute sind noch keine Aufträge geplant.</div>}{todaysOrders.map((o) => <button key={o.id} onClick={() => { setSelectedOrderId(o.id); setActive("orders"); }} className="w-full rounded-3xl bg-slate-50 p-4 text-left hover:bg-white hover:shadow-md"><div className="flex items-center justify-between"><strong>{o.time} · {o.customer}</strong><Badge>{o.status}</Badge></div><p className="mt-1 text-sm text-slate-600">{o.address}</p><div className="mt-2 flex flex-wrap gap-2"><Badge>{productTypes.find((p) => p.id === o.product)?.name}</Badge><Badge>{o.assignedTo || "ohne Monteur"}</Badge></div></button>)}</div></Card><Card><SectionTitle icon={CheckCircle2} title="Schnellprüfung" subtitle="Was heute offen sein könnte." /><div className="space-y-3">{["Aufträge mit Status offen prüfen", "Checklisten vor Ort abhaken", "Vorher-/Nachher-Fotos ergänzen", "Berichtsheft am Tagesende speichern", "Kundennachricht bei Verzögerung senden"].map((item) => <div key={item} className="rounded-2xl bg-slate-50 p-4 text-sm font-bold">{item}</div>)}</div></Card></div>)}
-  {active === "orders" && screen(<div className="grid gap-5 lg:grid-cols-[0.8fr_1.2fr]"><Card><SectionTitle icon={Plus} title="Auftrag anlegen" subtitle="Der Auftrag ist der Mittelpunkt: alle Fotos, Checklisten, Protokolle und Berichte können später damit verbunden werden." /><div className="space-y-3"><div className="grid gap-3 md:grid-cols-2"><Field label="Kunde" value={newOrder.customer} onChange={(v) => setNewOrder({ ...newOrder, customer: v })} /><Field label="Ansprechpartner" value={newOrder.contact} onChange={(v) => setNewOrder({ ...newOrder, contact: v })} /><Field label="Telefon" value={newOrder.phone} onChange={(v) => setNewOrder({ ...newOrder, phone: v })} /><Field label="E-Mail" value={newOrder.email} onChange={(v) => setNewOrder({ ...newOrder, email: v })} /><Field label="Adresse" value={newOrder.address} onChange={(v) => setNewOrder({ ...newOrder, address: v })} /><Field label="Monteur" value={newOrder.assignedTo} onChange={(v) => setNewOrder({ ...newOrder, assignedTo: v })} /><Field label="Datum" type="date" value={newOrder.date} onChange={(v) => setNewOrder({ ...newOrder, date: v })} /><Field label="Uhrzeit" type="time" value={newOrder.time} onChange={(v) => setNewOrder({ ...newOrder, time: v })} /></div><label className="block rounded-2xl bg-slate-50 p-4 text-sm font-bold">Produkt<select value={newOrder.product} onChange={(e) => setNewOrder({ ...newOrder, product: e.target.value })} className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-3">{productTypes.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select></label><div className="rounded-3xl border border-slate-100 bg-white p-4"><div className="flex items-center justify-between"><div><p className="text-xs font-bold uppercase text-slate-500">Checkliste wird automatisch gewählt</p><h3 className="mt-1 font-black">{newOrderProduct.name}</h3></div><Badge>{newOrderChecklistPreview.length} Punkte</Badge></div><div className="mt-3 grid gap-2">{newOrderChecklistPreview.slice(0, 5).map((item) => <div key={item} className="rounded-2xl bg-slate-50 p-3 text-xs font-bold text-slate-700">{item}</div>)}</div></div><div className="grid gap-3 md:grid-cols-2"><label className="block rounded-2xl bg-slate-50 p-4 text-sm font-bold">Untergrund<select value={newOrder.substrate} onChange={(e) => setNewOrder({ ...newOrder, substrate: e.target.value })} className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-3"><option>Beton</option><option>Lochstein</option><option>WDVS</option><option>Holz</option><option>Stahl</option></select></label><label className="block rounded-2xl bg-slate-50 p-4 text-sm font-bold">Antrieb<select value={newOrder.drive} onChange={(e) => setNewOrder({ ...newOrder, drive: e.target.value })} className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-3"><option>Gurt</option><option>Kurbel</option><option>Tastermotor</option><option>Funkmotor</option><option>Solarmotor</option></select></label><Field label="Priorität" value={newOrder.priority} onChange={(v) => setNewOrder({ ...newOrder, priority: v })} /><TextArea label="Notizen" value={newOrder.notes} onChange={(v) => setNewOrder({ ...newOrder, notes: v })} /></div><div className="grid gap-3 md:grid-cols-2"><button onClick={() => addOrder(false)} className="w-full rounded-2xl bg-slate-950 px-4 py-3 text-sm font-bold text-white">Auftrag speichern</button><button onClick={() => addOrder(true)} className="w-full rounded-2xl bg-emerald-100 px-4 py-3 text-sm font-bold text-emerald-800">Speichern & Checkliste öffnen</button></div></div></Card><Card><SectionTitle icon={ClipboardList} title="Auftragsliste" subtitle="Aufträge werden lokal gespeichert. Aktiven Auftrag bearbeiten, Status ändern oder löschen." />{selectedOrder && <div className="mb-5 rounded-3xl border border-slate-100 bg-white p-4 shadow-sm"><p className="text-xs font-bold uppercase text-slate-500">Aktiven Auftrag bearbeiten</p><div className="mt-3 grid gap-3 md:grid-cols-2"><Field label="Kunde" value={selectedOrder.customer || ""} onChange={(v) => updateSelectedOrder({ customer: v })} /><Field label="Adresse" value={selectedOrder.address || ""} onChange={(v) => updateSelectedOrder({ address: v })} /><label className="block rounded-2xl bg-slate-50 p-4 text-sm font-bold">Produkt<select value={selectedOrder.product} onChange={(e) => updateSelectedOrderProduct(e.target.value)} className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-3">{productTypes.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select></label><label className="block rounded-2xl bg-slate-50 p-4 text-sm font-bold">Status<select value={selectedOrder.status || "offen"} onChange={(e) => updateSelectedOrder({ status: e.target.value })} className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-3"><option>offen</option><option>in Arbeit</option><option>wartet auf Teile</option><option>erledigt</option><option>abgerechnet</option></select></label><TextArea label="Notizen" value={selectedOrder.notes || ""} onChange={(v) => updateSelectedOrder({ notes: v })} /></div><button onClick={deleteSelectedOrder} className="mt-4 rounded-2xl bg-rose-100 px-4 py-3 text-sm font-bold text-rose-800">Auftrag löschen</button></div>}<div className="mb-4 flex items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3"><Search size={18} /><input value={orderSearch} onChange={(e) => setOrderSearch(e.target.value)} placeholder="Auftrag suchen ..." className="w-full outline-none" /></div><div className="space-y-3">{filteredOrders.map((o) => <button key={o.id} onClick={() => setSelectedOrderId(o.id)} className={`w-full rounded-3xl border p-4 text-left ${selectedOrderId === o.id ? "border-slate-950 bg-white shadow-md" : "border-slate-100 bg-slate-50"}`}><div className="flex items-center justify-between"><strong>{o.id} · {o.customer}</strong><Badge>{o.status}</Badge></div><p className="mt-1 text-sm text-slate-600">{o.address}</p><div className="mt-2 flex flex-wrap gap-2"><Badge>{productTypes.find((p) => p.id === o.product)?.name}</Badge><Badge>{o.priority}</Badge></div><p className="mt-2 text-xs text-slate-500">{o.notes}</p></button>)}</div></Card></div>)}
-  {active === "workflow" && screen(<div className="space-y-5">
-    <Card><SectionTitle icon={ClipboardList} title="Auftrags-Workflow verständlich erklärt" subtitle="Der Workflow ist die Reihenfolge vom neuen Auftrag bis zum fertigen Abschluss. Jeder Schritt kann abgehakt werden." />
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{workflowStages.map((stage) => <article key={stage.title} className="rounded-3xl bg-slate-50 p-5"><h3 className="font-black">{stage.title}</h3><p className="mt-2 text-sm leading-6 text-slate-600">{stage.text}</p><div className="mt-4 space-y-2">{stage.checks.map((item) => checkButton(`workflow-${stage.title}`, item))}</div></article>)}</div>
-    </Card>
-    <div className="grid gap-5 lg:grid-cols-[0.8fr_1.2fr]"><Card><SectionTitle icon={Plus} title="Auftrag aus Vorlage starten" subtitle="Schnell einen typischen Auftrag anlegen und danach Schritt für Schritt abarbeiten." /><select value={workflowTemplateId} onChange={(e) => setWorkflowTemplateId(e.target.value)} className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-bold">{orderWorkflowTemplates.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</select><div className="mt-4 rounded-3xl bg-slate-50 p-4"><h3 className="font-black">{selectedWorkflowTemplate.name}</h3><p className="mt-2 text-sm leading-6 text-slate-600">{selectedWorkflowTemplate.notes}</p><div className="mt-3 flex flex-wrap gap-2"><Badge>{selectedWorkflowTemplate.orderType}</Badge><Badge>{allProductTypes.find((p) => p.id === selectedWorkflowTemplate.product)?.name || selectedWorkflowTemplate.product}</Badge></div></div><button onClick={createOrderFromWorkflowTemplate} className="mt-4 w-full rounded-2xl bg-slate-950 px-4 py-3 text-sm font-black text-white">Vorlage als neuen Auftrag anlegen</button></Card><Card><SectionTitle icon={BriefcaseBusiness} title="Aktiver Auftrag" subtitle="Status, Duplikat, Nacharbeit und Archiv sind die wichtigsten Workflow-Aktionen." /><div className="rounded-3xl bg-slate-50 p-5"><h3 className="font-black">{selectedOrder?.id} · {selectedOrder?.customer}</h3><p className="mt-2 text-sm leading-6 text-slate-600">{selectedProduct.name} · {selectedOrder?.address || "ohne Adresse"}</p><div className="mt-4 grid gap-2 md:grid-cols-3">{["offen", "geplant", "in Arbeit", "wartet auf Teile", "Nacharbeit nötig", "erledigt", "abgerechnet"].map((status) => <button key={status} onClick={() => updateSelectedOrderStatus(status)} className={`rounded-2xl px-3 py-2 text-xs font-bold ${selectedOrder?.status === status ? "bg-slate-950 text-white" : "bg-white text-slate-700"}`}>{status}</button>)}</div><div className="mt-4 grid gap-2 md:grid-cols-3"><button onClick={duplicateSelectedOrder} className="rounded-2xl bg-slate-100 px-4 py-3 text-sm font-bold">Duplizieren</button><button onClick={createReworkOrder} className="rounded-2xl bg-amber-100 px-4 py-3 text-sm font-bold text-amber-900">Nacharbeit erstellen</button><button onClick={archiveSelectedOrder} className="rounded-2xl bg-rose-100 px-4 py-3 text-sm font-bold text-rose-800">Archivieren</button></div></div><div className="mt-4 rounded-3xl bg-white p-4"><p className="text-xs font-bold uppercase text-slate-500">Statusverlauf</p><div className="mt-3 space-y-2">{currentOrderHistory.map((h, index) => <div key={`${h.at}-${index}`} className="rounded-2xl bg-slate-50 p-3 text-sm"><strong>{h.status}</strong><p className="text-xs text-slate-500">{h.at} · {h.by} · {h.note}</p></div>)}</div></div></Card></div>
-  </div>)}
-  {active === "closeOrder" && screen(<div className="grid gap-5 lg:grid-cols-[1fr_0.8fr]"><Card><SectionTitle icon={CheckCircle2} title="Auftrag abschließen" subtitle="Erweiterte Abschlussprüfung: Funktion, Fotos, Einweisung, offene Punkte, Ersatzteile und PDF-Dokumentation." /><div className="mb-5 rounded-3xl bg-slate-50 p-4"><h3 className="font-black">{selectedOrder?.id} · {selectedOrder?.customer}</h3><p className="mt-1 text-sm text-slate-600">{selectedProduct.name} · Status: {selectedOrder?.status}</p><div className="mt-3 grid gap-2 md:grid-cols-4"><Badge>{selectedChecklistProgress}% Checkliste</Badge><Badge>{missingMeasurements.length ? `${missingMeasurements.length} Aufmaß fehlt` : "Aufmaß okay"}</Badge><Badge>{Object.keys(photos).length} Fotos</Badge><Badge>{pdfDocuments.some((doc) => doc.orderId === selectedOrder?.id) ? "PDF gespeichert" : "PDF offen"}</Badge></div></div><div className="space-y-3">{closeChecks.map((item) => <label key={item.id} className={`flex items-center gap-3 rounded-2xl p-4 text-sm font-bold ${item.done ? "bg-emerald-50 text-emerald-900" : "bg-amber-50 text-amber-900"}`}>{item.type === "manual" ? <input type="checkbox" checked={Boolean(manualQuality[selectedOrder?.id]?.[item.id])} onChange={() => toggleQuality(item.id)} className="h-5 w-5 accent-slate-950" /> : item.done ? <CheckCircle2 size={20} /> : <AlertTriangle size={20} />}<span>{item.label}</span></label>)}</div><div className="mt-5 rounded-3xl bg-slate-50 p-4"><p className="mb-3 text-xs font-bold uppercase text-slate-500">Zusätzliche Abschluss-Checkmarks</p><div className="grid gap-2 md:grid-cols-2">{closingExtraChecks.map((item) => checkButton(`abschluss-${selectedOrder?.id}`, item))}</div></div><button disabled={!closeReady} onClick={completeSelectedOrder} className={`mt-5 w-full rounded-2xl px-5 py-4 text-sm font-black ${closeReady ? "bg-slate-950 text-white" : "bg-slate-200 text-slate-500"}`}>{closeReady ? "Auftrag als erledigt markieren" : "Abschluss noch nicht möglich"}</button></Card><Card><SectionTitle icon={FileText} title="Nächste Abschluss-Aktionen" subtitle="Direkt zu den offenen Bereichen springen." />{closeChecks.filter((c) => !c.done).length === 0 ? <div className="rounded-3xl bg-emerald-50 p-5 text-sm font-bold text-emerald-900">Pflichtpunkte erledigt. Jetzt PDF speichern und Kundenübergabe dokumentieren.</div> : <div className="space-y-3">{closeChecks.filter((c) => !c.done).map((c) => <button key={c.id} onClick={() => setActive(c.type === "photos" ? "photos" : c.type === "checklist" ? "checklists" : "orders")} className="w-full rounded-2xl bg-slate-50 p-4 text-left text-sm font-bold hover:bg-white hover:shadow">{c.label} öffnen</button>)}</div>}<div className="mt-5 grid gap-2"><button onClick={() => setActive("pdf")} className="rounded-2xl bg-slate-950 px-4 py-3 text-sm font-black text-white">PDF/Protokoll öffnen</button><button onClick={createReworkOrder} className="rounded-2xl bg-amber-100 px-4 py-3 text-sm font-black text-amber-900">Nacharbeit erstellen</button><button onClick={() => setActive("parts")} className="rounded-2xl bg-slate-100 px-4 py-3 text-sm font-black">Ersatzteil-Anfrage öffnen</button></div></Card></div>)}
-  {active === "products" && screen(<Card><SectionTitle icon={Sun} title="Produkt-Lexikon" subtitle="Erweitert mit Checkmarks: Schritte, Werkzeug und Risiken pro Produkt." /><div className="grid gap-4 lg:grid-cols-2">{allProductTypes.map((p) => <article key={p.id} className="rounded-3xl bg-slate-50 p-5"><div className="flex items-center justify-between"><h3 className="text-lg font-black">{p.name}</h3><Badge>{p.category}</Badge></div><p className="mt-3 text-sm leading-6 text-slate-600">{p.description}</p><div className="mt-4 grid gap-4 md:grid-cols-2"><div><p className="text-xs font-bold uppercase text-slate-500">Ablauf abhaken</p><div className="mt-2 space-y-2">{p.steps.map((step) => checkButton(`produkt-${p.id}`, step))}</div></div><div><p className="text-xs font-bold uppercase text-slate-500">Risiken</p><div className="mt-2 space-y-2">{p.risks.map((risk) => checkButton(`produkt-risiko-${p.id}`, risk))}</div><p className="mt-4 text-xs font-bold uppercase text-slate-500">Werkzeug</p><div className="mt-2 flex flex-wrap gap-2">{p.tools.map((t) => <Badge key={t}>{t}</Badge>)}</div></div></div></article>)}</div></Card>)}
+    {active === "orders" && screen(<OrdersPage addOrder={addOrder} deleteSelectedOrder={deleteSelectedOrder} filteredOrders={filteredOrders} newOrder={newOrder} newOrderChecklistPreview={newOrderChecklistPreview} newOrderProduct={newOrderProduct} notes={notes} orderSearch={orderSearch} selectedOrder={selectedOrder} selectedOrderId={selectedOrderId} setNewOrder={setNewOrder} setOrderSearch={setOrderSearch} setSelectedOrderId={setSelectedOrderId} updateSelectedOrder={updateSelectedOrder} updateSelectedOrderProduct={updateSelectedOrderProduct} />)}
+    {active === "workflow" && screen(<WorkflowPage archiveSelectedOrder={archiveSelectedOrder} canOpenModule={canOpenModule} createOrderFromWorkflowTemplate={createOrderFromWorkflowTemplate} createReworkOrder={createReworkOrder} currentOrderHistory={currentOrderHistory} duplicateSelectedOrder={duplicateSelectedOrder} orderWorkflowTemplates={orderWorkflowTemplates} selectedOrder={selectedOrder} selectedProduct={selectedProduct} selectedWorkflowTemplate={selectedWorkflowTemplate} setActive={setActive} setWorkflowTemplateId={setWorkflowTemplateId} workflowStages={workflowStages} workflowTemplateId={workflowTemplateId} />)}
+    {active === "closeOrder" && screen(<CloseOrderPage closeReady={closeReady} closingGroups={closingGroups} closingValues={closingValues} completeSelectedOrder={completeSelectedOrder} createReworkOrder={() => createReworkOrder({ keepSourceSelected: true })} missingClosingItems={unresolvedQuality} openArea={setActive} selectedChecklistProgress={selectedChecklistProgress} selectedOrder={selectedOrder} selectedProduct={selectedProduct} setQualityValue={setQualityValue} startPartRequest={startPartRequestForSelectedOrder} toggleQuality={toggleQuality} />)}
+    {active === "products" && screen(<ProductLexiconPage checkButton={checkButton} moduleChecks={moduleChecks} selectedOrder={selectedOrder} selectedProduct={selectedProduct} />)}
   {active === "checklists" && screen(<Card><SectionTitle icon={ClipboardCheck} title="Checklisten pro Produkt" subtitle="Checkliste richtet sich automatisch nach Produkt, Untergrund, Antrieb und Windlage." /><div className="mb-5 rounded-3xl bg-slate-50 p-4"><div className="grid gap-4 lg:grid-cols-[1fr_0.7fr]"><div><strong>{selectedOrder?.id} · {selectedProduct.name}</strong><p className="mt-1 text-sm text-slate-600">{selectedOrder?.customer}</p><label className="mt-4 block text-sm font-bold text-slate-800">Produkt<select value={selectedOrder?.product || ""} onChange={(e) => updateSelectedOrderProduct(e.target.value)} className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm font-bold">{productTypes.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select></label></div><div className="rounded-3xl bg-white p-4"><div className="flex items-center justify-between text-sm font-bold"><span>Fortschritt</span><span>{selectedChecklistDone}/{selectedChecklistItems.length}</span></div><div className="mt-3 h-3 overflow-hidden rounded-full bg-slate-100"><div className="h-full rounded-full bg-slate-950 transition-all" style={{ width: `${selectedChecklistProgress}%` }} /></div><p className="mt-2 text-xs font-semibold text-slate-500">{selectedChecklistProgress}% erledigt</p></div></div></div><div className="grid gap-3 md:grid-cols-2">{selectedChecklistItems.map((item) => <label key={item} className="flex cursor-pointer items-center gap-3 rounded-2xl bg-slate-50 p-4 text-sm font-bold"><input type="checkbox" checked={Boolean(checks[selectedOrder?.id]?.[item])} onChange={() => toggleCheck(selectedOrder?.id, item)} className="h-5 w-5 accent-slate-950" />{item}</label>)}</div></Card>)}
-  {active === "tools" && screen(<Card><SectionTitle icon={Hammer} title="Werkzeug & Material" subtitle="Erweiterte Werkzeug- und Materiallisten mit abhakelbaren Vorbereitungscheckmarks." /><div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{allToolKits.map((kit) => <article key={kit.group} className="rounded-3xl bg-slate-50 p-5"><div className="flex items-center justify-between gap-3"><h3 className="font-black">{kit.group}</h3><button onClick={() => markScopeDone(`werkzeug-${kit.group}`, kit.items)} className="rounded-xl bg-white px-3 py-2 text-xs font-bold">alle da</button></div><div className="mt-3 space-y-2">{kit.items.map((i) => checkButton(`werkzeug-${kit.group}`, i))}</div></article>)}</div></Card>)}
-  {active === "substrates" && screen(<Card><SectionTitle icon={HardHat} title="Untergrund-Assistent" subtitle="Erweitert mit zusätzlicher Untergrundauswahl, Befestigungsrisiken und Checkmarks." /><div className="grid gap-4 lg:grid-cols-2">{allSubstrates.map((s) => <article key={s.name} className="rounded-3xl bg-slate-50 p-5"><h3 className="text-lg font-black">{s.name}</h3><div className="mt-4 grid gap-4 md:grid-cols-2"><div><p className="text-xs font-bold uppercase text-slate-500">Werkzeuge prüfen</p><div className="mt-2 space-y-2">{s.tools.map((t) => checkButton(`untergrund-tool-${s.name}`, t))}</div></div><div><p className="text-xs font-bold uppercase text-slate-500">Befestigung prüfen</p><div className="mt-2 space-y-2">{s.fasteners.map((f) => checkButton(`untergrund-fix-${s.name}`, f))}</div></div></div><div className="mt-4 rounded-2xl bg-amber-50 p-3 text-sm font-bold leading-6 text-amber-900">{s.warning}</div></article>)}</div></Card>)}
-  {active === "motors" && screen(<Card><SectionTitle icon={Zap} title="Motoren & Steuerungen" subtitle="Erweitert mit Funk, Taster, externem Empfänger, Smart Home, Sensorik und Rolltor-Steuerung. Prüfpunkte sind abhackbar." /><div className="grid gap-4 lg:grid-cols-2">{allMotorTypes.map((m) => <article key={m.name} className="rounded-3xl bg-slate-50 p-5"><h3 className="text-lg font-black">{m.name}</h3><p className="mt-2 text-sm leading-6 text-slate-600">{m.details}</p><div className="mt-4 grid gap-4 md:grid-cols-2"><div><p className="text-xs font-bold uppercase text-slate-500">Prüfen</p><div className="mt-2 space-y-2">{m.checks.map((c) => checkButton(`motor-check-${m.name}`, c))}</div></div><div><p className="text-xs font-bold uppercase text-slate-500">Typische Fehler ausschließen</p><div className="mt-2 space-y-2">{m.mistakes.map((c) => checkButton(`motor-fehler-${m.name}`, c))}</div></div></div></article>)}</div></Card>)}
-  {active === "diagnose" && screen(<Card><SectionTitle icon={HelpCircle} title="Erweiterte Fehlerdiagnose" subtitle="Mehr Fehlerbilder, Kategorie-Filter, Werkzeug, erste Schritte und Ja/Nein-Entscheidung." /><DiagnosisStepMode trees={filteredDiagnosisTrees.length ? filteredDiagnosisTrees : allDiagnosisTrees} /><div className="mb-5 grid gap-3 md:grid-cols-[0.8fr_1.2fr]"><select value={diagnosisCategory} onChange={(e) => setDiagnosisCategory(e.target.value)} className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-bold"><option value="all">Alle Kategorien</option>{diagnosisCategories.filter((c) => c !== "all").map((category) => <option key={category}>{category}</option>)}</select><div className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3"><Search size={18} /><input value={diagnosisQuery} onChange={(e) => setDiagnosisQuery(e.target.value)} placeholder="Diagnose suchen, z. B. Frost, Funk, Rolltor ..." className="w-full outline-none" /></div></div><div className="mb-5 grid gap-3 md:grid-cols-4"><div className="rounded-3xl bg-slate-50 p-4"><p className="text-3xl font-black">{allDiagnosisTrees.length}</p><p className="text-sm text-slate-600">Fehlerbilder</p></div><div className="rounded-3xl bg-slate-50 p-4"><p className="text-3xl font-black">{diagnosisCategories.length - 1}</p><p className="text-sm text-slate-600">Kategorien</p></div><div className="rounded-3xl bg-slate-50 p-4"><p className="text-3xl font-black">Ja/Nein</p><p className="text-sm text-slate-600">Schrittmodus</p></div><div className="rounded-3xl bg-amber-50 p-4 text-sm font-bold leading-6 text-amber-900">Bei Elektro/Sicherheit immer Fachregeln und Herstellerangaben beachten.</div></div><div className="grid gap-4 lg:grid-cols-2">{filteredDiagnosisTrees.map((d) => <article key={d.id} className="rounded-3xl bg-slate-50 p-5"><div className="flex items-center justify-between gap-3"><h3 className="text-lg font-black">{d.title}</h3><Badge>{d.category}</Badge></div><p className="mt-4 text-xs font-bold uppercase text-slate-500">Erste Schritte</p><div className="mt-2 space-y-2">{(d.firstSteps || []).map((step) => checkButton(`diagnose-step-${d.id}`, step))}</div><p className="mt-4 text-xs font-bold uppercase text-slate-500">Werkzeuge</p><div className="mt-2 flex flex-wrap gap-2">{d.tools.map((tool) => <Badge key={tool}>{tool}</Badge>)}</div><p className="mt-4 rounded-2xl bg-white p-4 text-sm font-bold">{d.start.q}</p><div className="mt-3 grid gap-3 md:grid-cols-2"><div className="rounded-2xl bg-emerald-50 p-4 text-sm leading-6 text-emerald-900"><strong>Wenn Ja:</strong> {d.start.yes}</div><div className="rounded-2xl bg-rose-50 p-4 text-sm leading-6 text-rose-900"><strong>Wenn Nein:</strong> {d.start.no}</div></div></article>)}</div></Card>)}
-  {active === "manufacturers" && screen(<Card><SectionTitle icon={Database} title="Herstellerdatenbank" subtitle="Erweitert: Hersteller, Protokolle, Systeme, typische Themen und Dokumentationshinweise." /><div className="mb-4 flex items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3"><Search size={18} /><input value={manufacturerQuery} onChange={(e) => setManufacturerQuery(e.target.value)} placeholder="Hersteller, Protokoll, Thema suchen ..." className="w-full outline-none" /></div><div className="mb-4 grid gap-3 md:grid-cols-3"><div className="rounded-3xl bg-slate-50 p-4"><p className="text-3xl font-black">{allManufacturers.length}</p><p className="text-sm text-slate-600">Hersteller/Marken</p></div><div className="rounded-3xl bg-slate-50 p-4"><p className="text-3xl font-black">Foto</p><p className="text-sm text-slate-600">Typenschild empfohlen</p></div><div className="rounded-3xl bg-amber-50 p-4 text-sm font-bold leading-6 text-amber-900">Keine Herstelleranleitung ersetzen. Tastfolgen immer mit Modell/Serie prüfen.</div></div><div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{filteredMakers.map((m) => <article key={m.name} className="rounded-3xl bg-slate-50 p-5"><h3 className="font-black">{m.name}</h3><p className="mt-3 text-xs font-bold uppercase text-slate-500">Protokolle</p><div className="mt-2 flex flex-wrap gap-2">{m.protocols.map((p) => <Badge key={p}>{p}</Badge>)}</div><p className="mt-3 text-xs font-bold uppercase text-slate-500">Themen abhaken</p><div className="mt-2 space-y-2">{m.topics.map((topic) => checkButton(`hersteller-${m.name}`, topic))}</div><p className="mt-4 text-sm leading-6 text-slate-600">{m.note}</p></article>)}</div></Card>)}
+    {active === "tools" && screen(<ToolsPage checkButton={checkButton} markScopeDone={markScopeDone} moduleChecks={moduleChecks} selectedOrder={selectedOrder} selectedProduct={selectedProduct} />)}
+    {active === "substrates" && screen(<SubstratesPage checkButton={checkButton} moduleChecks={moduleChecks} selectedOrder={selectedOrder} selectedProduct={selectedProduct} />)}
+    {active === "motors" && screen(<MotorsPage checkButton={checkButton} moduleChecks={moduleChecks} selectedOrder={selectedOrder} selectedProduct={selectedProduct} />)}
+    {active === "diagnose" && screen(<DiagnosisPage checkButton={checkButton} diagnosisCategories={diagnosisCategories} diagnosisCategory={diagnosisCategory} diagnosisQuery={diagnosisQuery} filteredDiagnosisTrees={filteredDiagnosisTrees} moduleChecks={moduleChecks} selectedOrder={selectedOrder} selectedProduct={selectedProduct} setDiagnosisCategory={setDiagnosisCategory} setDiagnosisQuery={setDiagnosisQuery} />)}
+    {active === "manufacturers" && screen(<ManufacturersPage checkButton={checkButton} filteredMakers={filteredMakers} manufacturerQuery={manufacturerQuery} moduleChecks={moduleChecks} selectedOrder={selectedOrder} selectedProduct={selectedProduct} setManufacturerQuery={setManufacturerQuery} />)}
   {active === "measurement" && screen(<div className="grid gap-5 lg:grid-cols-[1fr_0.8fr]"><Card><SectionTitle icon={Wrench} title="Intelligenter Aufmaß-Assistent" subtitle="Pflichtfelder ändern sich je nach Produkt des aktiven Auftrags." /><div className="mb-4 rounded-3xl bg-slate-50 p-4"><h3 className="font-black">{selectedProduct.name}</h3><p className="mt-1 text-sm text-slate-600">Auftrag: {selectedOrder?.id} · {selectedOrder?.customer}</p></div><div className="grid gap-4 md:grid-cols-2">{measurementFields.map((field) => <Field key={field} label={field} value={orderMeasurements[field] || ""} onChange={(value) => setMeasurementField(field, value)} placeholder={`${field} eintragen`} />)}</div></Card><Card><SectionTitle icon={AlertTriangle} title="Aufmaß-Vollständigkeit" subtitle="Die App prüft fehlende Pflichtfelder." /><div className="mb-4 rounded-3xl bg-slate-950 p-5 text-white"><p className="text-4xl font-black">{measurementFields.length - missingMeasurements.length}/{measurementFields.length}</p><p className="text-sm text-white/70">Pflichtfelder ausgefüllt</p></div>{missingMeasurements.length === 0 ? <div className="rounded-3xl bg-emerald-50 p-5 text-sm font-bold text-emerald-900">Aufmaß vollständig.</div> : <div className="space-y-2">{missingMeasurements.map((field) => <div key={field} className="rounded-2xl bg-amber-50 p-3 text-sm font-bold text-amber-900">Fehlt: {field}</div>)}</div>}</Card></div>)}
   {active === "offers" && screen(<div className="grid gap-5 lg:grid-cols-[1fr_0.7fr]"><Card><SectionTitle icon={Euro} title="Angebotsassistent" subtitle="Grobe Kalkulation mit Material, Lohn, Anfahrt, WDVS-Zuschlag und Entsorgung." /><div className="grid gap-4 md:grid-cols-2">{Object.entries(calc).map(([k, v]) => <Field key={k} label={k} type="number" value={v} onChange={(value) => setCalc({ ...calc, [k]: value })} />)}</div></Card><Card><SectionTitle icon={Calculator} title="Preisvorschau" subtitle="Grobe Struktur für ein Angebots-PDF." /><div className="space-y-3"><div className="flex justify-between rounded-2xl bg-slate-50 p-4"><span>Netto</span><strong>{net.toFixed(2)} €</strong></div><div className="flex justify-between rounded-2xl bg-slate-50 p-4"><span>MwSt. 19%</span><strong>{(net * 0.19).toFixed(2)} €</strong></div><div className="flex justify-between rounded-2xl bg-slate-950 p-4 text-white"><span>Brutto</span><strong>{(net * 1.19).toFixed(2)} €</strong></div></div><CopyBox title="Angebotstext kopieren" text={`Wir bieten Ihnen die Lieferung und Montage von ${selectedProduct.name} gemäß Aufmaß und technischer Klärung an. Untergrund, Stromanschluss und Herstellerangaben sind vor Ausführung zu prüfen.`} /></Card></div>)}
   {active === "photos" && screen(<Card><SectionTitle icon={Camera} title="Foto-KI Workflow" subtitle="Fotos hochladen, zuordnen und als Prototyp auswerten." /><div className="grid gap-4 md:grid-cols-3">{["Typenschild", "Ersatzteil", "Untergrund", "Schaden", "Vorher", "Nachher"].map((label) => <div key={label} className="rounded-3xl bg-slate-50 p-5"><h3 className="font-black">{label}</h3><label className="mt-4 flex cursor-pointer flex-col items-center justify-center rounded-2xl border-2 border-dashed border-slate-200 bg-white p-4 text-sm font-bold"><Upload className="mb-2" />Foto hinzufügen<input type="file" accept="image/*" className="hidden" onChange={(e) => uploadPhoto(label, e.target.files?.[0])} /></label>{photos[label] && <img src={photos[label].url} alt={label} className="mt-4 h-40 w-full rounded-2xl object-cover" />}<button onClick={() => runPhotoAnalysis(label)} className="mt-3 w-full rounded-2xl bg-slate-950 px-4 py-2 text-sm font-bold text-white">{label} auswerten</button>{photoAnalyses[label] && <div className="mt-3 rounded-2xl bg-white p-3 text-xs font-bold leading-5 text-slate-600">{photoAnalyses[label]}</div>}</div>)}</div></Card>)}
-  {active === "parts" && screen(<Card><SectionTitle icon={PackageSearch} title="Ersatzteil-Finder mit erweitertem Anfrageformular" subtitle="Mehr Felder, bessere Anfrage, Suchfilter und Checkliste für Fotos/Typenschild." /><div className="mb-5 rounded-3xl bg-slate-50 p-5"><h3 className="font-black">Ersatzteil-Anfrage vorbereiten</h3><div className="mt-4 grid gap-3 md:grid-cols-3"><Field label="Produktart" value={partRequest.product} onChange={(v) => setPartRequest({ ...partRequest, product: v })} /><Field label="Hersteller" value={partRequest.manufacturer} onChange={(v) => setPartRequest({ ...partRequest, manufacturer: v })} /><Field label="Bauteil" value={partRequest.part} onChange={(v) => setPartRequest({ ...partRequest, part: v })} /><Field label="Maß / Typ / Profil" value={partRequest.measure} onChange={(v) => setPartRequest({ ...partRequest, measure: v })} /><Field label="Farbe / Oberfläche" value={partRequest.color} onChange={(v) => setPartRequest({ ...partRequest, color: v })} /><Field label="Welle / Seite / Führung" value={partRequest.shaft} onChange={(v) => setPartRequest({ ...partRequest, shaft: v })} /><Field label="Motor / Steuerung" value={partRequest.motor} onChange={(v) => setPartRequest({ ...partRequest, motor: v })} /><Field label="Seriennummer / Typenschild" value={partRequest.serial} onChange={(v) => setPartRequest({ ...partRequest, serial: v })} /><label className="flex items-center gap-3 rounded-2xl bg-white p-4 text-sm font-bold"><input type="checkbox" checked={partRequest.urgent} onChange={(e) => setPartRequest({ ...partRequest, urgent: e.target.checked })} className="h-5 w-5 accent-slate-950" />Dringend / Stillstand</label></div><div className="mt-4 grid gap-2 md:grid-cols-4">{["Typenschildfoto", "Profilfoto", "Maßfoto", "Schadenfoto"].map((item) => checkButton(`ersatzteil-anfrage-${selectedOrder?.id}`, item))}</div><div className="mt-4"><CopyBox title="Ersatzteil-Anfrage kopieren" text={partRequestText} /></div></div><div className="mb-4 grid gap-3 md:grid-cols-[0.5fr_1fr]"><select value={partGroup} onChange={(e) => setPartGroup(e.target.value)} className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-bold"><option value="all">Alle Gruppen</option>{[...new Set(allPartCatalog.map((p) => p.group))].map((g) => <option key={g}>{g}</option>)}</select><input value={partQuery} onChange={(e) => setPartQuery(e.target.value)} placeholder="z. B. SW60, Sender, Keder, Hochschiebesicherung ..." className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-bold outline-none" /></div><div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{filteredParts.map((p) => <article key={`${p.group}-${p.name}`} className="rounded-3xl bg-slate-50 p-5"><h3 className="font-black">{p.name}</h3><div className="mt-2 flex gap-2"><Badge>{p.group}</Badge><Badge>{p.product}</Badge></div><p className="mt-4 text-xs font-bold uppercase text-slate-500">Abfragen</p><div className="mt-2 space-y-2">{p.asks.map((a) => checkButton(`ersatzteil-${p.name}`, a))}</div><p className="mt-4 text-sm leading-6 text-slate-600">{p.tip}</p></article>)}</div></Card>)}
+    {active === "parts" && screen(<PartsPage checkButton={checkButton} filteredParts={filteredParts} loadPartRequestDraft={loadPartRequestDraft} moduleChecks={moduleChecks} newPartRequestDraft={newPartRequestDraft} orders={visibleOrders} partGroup={partGroup} partPhotoScope={partPhotoScope} partQuery={partQuery} partRequest={partRequest} partRequests={partRequests} partRequestText={partRequestText} savePartRequestDraft={savePartRequestDraft} selectedOrder={selectedOrder} setPartGroup={setPartGroup} setPartQuery={setPartQuery} setPartRequest={setPartRequest} updatePartRequestStatus={updatePartRequestStatus} />)}
   {active === "customers" && screen(<Card><SectionTitle icon={MessageSquareText} title="Kundenkommunikation mit Auftragsdaten" subtitle="Texte mit Platzhaltern werden aus dem aktiven Auftrag gefüllt." /><div className="mb-5 rounded-3xl bg-slate-50 p-4 text-sm leading-6"><strong>Aktiver Auftrag:</strong> {selectedOrder?.customer} · {selectedProduct.name} · {selectedOrder?.date} {selectedOrder?.time}</div><div className="grid gap-4 md:grid-cols-2">{customerTemplates.map((t) => <CopyBox key={t.title} title={t.title} text={customerTemplateForOrder(t.text)} />)}</div></Card>)}
-  {active === "maintenance" && screen(<Card><SectionTitle icon={RefreshCw} title="Wartung & Pflege" subtitle="Erweitert mit abhakelbaren Wartungsschritten für Monteure und verständlichen Pflegehinweisen für Kunden." /><div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{allMaintenanceTips.map((m) => <article key={`${m.product}-${m.title}`} className="rounded-3xl bg-slate-50 p-5"><Badge>{m.product}</Badge><h3 className="mt-3 font-black">{m.title}</h3><div className="mt-3 space-y-2">{m.steps.map((s) => checkButton(`wartung-${m.product}-${m.title}`, s))}</div></article>)}</div></Card>)}
-  {active === "learning" && screen(<div className="space-y-5"><Card><SectionTitle icon={GraduationCap} title="Lernmodus groß erweitert" subtitle="Lernmodule, Checkmarks, Quiz-Trainer, Berichtsheft-Verknüpfung und Meister-Empfehlungen." /><div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4"><div className="rounded-3xl bg-slate-50 p-4"><p className="text-3xl font-black">{expandedLearningModules.length}</p><p className="text-sm text-slate-600">Lernmodule</p></div><div className="rounded-3xl bg-slate-50 p-4"><p className="text-3xl font-black">{allQuizCards.length}</p><p className="text-sm text-slate-600">Quizfragen</p></div><div className="rounded-3xl bg-slate-50 p-4"><p className="text-3xl font-black">{myReports.length}</p><p className="text-sm text-slate-600">Berichte</p></div><div className="rounded-3xl bg-emerald-50 p-4 text-sm font-bold leading-6 text-emerald-900">Checkmarks werden lokal gespeichert und können als Lernfortschritt genutzt werden.</div></div></Card><Card><SectionTitle icon={BookOpen} title="Lernmodule mit Checkmarks" subtitle="Nach Ausbildungsjahr aufgebaut: Grundlagen, Montage, Untergrund, Motor, Diagnose und Qualität." /><div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{expandedLearningModules.map((module) => <article key={module.topic} className="rounded-3xl bg-slate-50 p-5"><div className="flex items-center justify-between"><h3 className="font-black">{module.topic}</h3><Badge>{module.year}. Jahr</Badge></div><p className="mt-3 text-sm leading-6 text-slate-600">{module.goal}</p><div className="mt-3 space-y-2">{module.tasks.map((task) => checkButton(`lernen-${module.topic}`, task))}</div></article>)}</div></Card><Card><SectionTitle icon={GraduationCap} title="Quiz-Trainer" subtitle="Mehr Fragen zu Werkzeug, Sicherheit, Untergrund, Motor, Funk, Qualität und Normen." /><QuizTrainer cards={allQuizCards} /></Card></div>)}
-  {active === "knowledge" && screen(<div className="space-y-5"><Card><SectionTitle icon={Layers} title="Wissensbereich mit Skizzenkarten" subtitle="Skizzenkarten plus freie Zeichnungsfläche für Maus, Stift oder Finger am Handy." /><DrawingPad image={sketchImage} onChange={setSketchImage} onSaved={showNotice} /><div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-3">{sketchCards.map((card) => <article key={card.title} className="rounded-3xl bg-slate-50 p-5"><div className="mb-4 rounded-2xl bg-white p-4 text-center text-sm font-black text-slate-500 shadow-sm">Skizze: {card.title}</div><h3 className="font-black">{card.title}</h3><div className="mt-3 flex flex-wrap gap-2">{card.parts.map((part) => <Badge key={part}>{part}</Badge>)}</div><div className="mt-4 space-y-2">{card.parts.slice(0, 4).map((part) => checkButton(`skizze-${card.title}`, part))}</div><p className="mt-4 rounded-2xl bg-amber-50 p-3 text-sm leading-6 text-amber-900">{card.tip}</p></article>)}</div></Card></div>)}
+    {active === "maintenance" && screen(<MaintenancePage checkButton={checkButton} moduleChecks={moduleChecks} selectedOrder={selectedOrder} selectedProduct={selectedProduct} />)}
+    {active === "learning" && screen(<LearningPage appRole={appRole} canViewTeam={canViewLearningTeam} companyPeople={companyPeople} currentLearnerId={learningUserId} currentPerson={currentPerson} learningProgress={learningProgress} myReports={myReports} updateLearningProgress={updateLearningProgress} />)}
+    {active === "knowledge" && screen(<SketchesPage checkButton={checkButton} deleteSketch={deleteSketchRecord} orders={visibleOrders} saveSketch={saveSketchRecord} savedSketches={Array.isArray(savedSketches) ? savedSketches : []} selectedOrderId={selectedOrder?.id || selectedOrderId} setSketchImage={setSketchImage} showNotice={showNotice} sketchImage={sketchImage} />)}
   {active === "reportBook" && screen(<div className="space-y-5"><Card><SectionTitle icon={BookOpen} title="Berichtsheft-Funktionen" subtitle="Tages-/Wochenbericht, Vorlage, Checklistenübernahme, Foto-Notiz, Status/Freigabe, Erinnerung, Speichern und Export." /><div className="grid gap-5 xl:grid-cols-[0.9fr_1.1fr]"><div className="space-y-4"><div className="grid gap-3 md:grid-cols-2"><label className="block rounded-2xl bg-slate-50 p-4 text-sm font-bold">Berichtsart<select value={reportMode} onChange={(e) => setReportMode(e.target.value)} className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-3"><option>Tagesbericht</option><option>Wochenbericht</option></select></label><label className="block rounded-2xl bg-slate-50 p-4 text-sm font-bold">Ausbildungsjahr<select value={reportYear} onChange={(e) => setReportYear(e.target.value)} className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-3"><option value="1">1. Ausbildungsjahr</option><option value="2">2. Ausbildungsjahr</option><option value="3">3. Ausbildungsjahr</option></select></label><label className="block rounded-2xl bg-slate-50 p-4 text-sm font-bold">Lernfeld<select value={reportLearningField} onChange={(e) => setReportLearningField(e.target.value)} className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-3">{reportLearningFields.map((field) => <option key={field}>{field}</option>)}</select></label><label className="block rounded-2xl bg-slate-50 p-4 text-sm font-bold">Tätigkeits-Vorlage<select value={reportTemplateId} onChange={(e) => setReportTemplateId(e.target.value)} className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-3">{reportActivityTemplates.map((template) => <option key={template.id} value={template.id}>{template.label}</option>)}</select></label></div><div className="grid gap-3 md:grid-cols-3"><button onClick={applyReportTemplate} className="rounded-2xl bg-slate-950 px-4 py-3 text-sm font-bold text-white">Vorlage übernehmen</button><button onClick={importChecklistIntoReport} className="rounded-2xl bg-emerald-100 px-4 py-3 text-sm font-bold text-emerald-800">Checkliste übernehmen</button><button onClick={addPhotoNoteToReport} className="rounded-2xl bg-sky-100 px-4 py-3 text-sm font-bold text-sky-800">Foto-Notiz einfügen</button><button onClick={generateWeeklyReport} className="rounded-2xl bg-violet-100 px-4 py-3 text-sm font-bold text-violet-800">Wochenbericht erzeugen</button><button onClick={approveLatestReport} className="rounded-2xl bg-emerald-100 px-4 py-3 text-sm font-bold text-emerald-800">Letzten Bericht freigeben</button><button onClick={exportCurrentReport} className="rounded-2xl bg-slate-100 px-4 py-3 text-sm font-bold text-slate-800">Bericht exportieren</button></div><TextArea label="Stichpunkte / eigener Text" value={reportText} onChange={setReportText} /><div className="rounded-3xl bg-slate-50 p-4"><p className="text-xs font-bold uppercase text-slate-500">Fachbegriffe</p><div className="mt-3 flex flex-wrap gap-2">{reportTerms.map((term) => <Badge key={term}>{term}</Badge>)}</div></div><div className="grid gap-3 md:grid-cols-2"><label className="block rounded-2xl bg-slate-50 p-4 text-sm font-bold">Status<select value={reportStatus} onChange={(e) => setReportStatus(e.target.value)} className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-3"><option>Entwurf</option><option>Zur Prüfung</option><option>Änderung nötig</option><option>Freigegeben</option></select></label><Field label="Erinnerung" value={reportReminder} onChange={setReportReminder} /></div><TextArea label="Meister-Kommentar" value={reportMasterComment} onChange={setReportMasterComment} /></div><div className="space-y-4"><CopyBox title="Bericht-Vorschlag kopieren" text={reportProposal} /><div className="grid gap-3 md:grid-cols-3"><button onClick={saveReportEntry} className="flex items-center justify-center gap-2 rounded-2xl bg-slate-950 px-4 py-3 text-sm font-bold text-white"><Save size={17} />Speichern</button><button onClick={() => setPdfTarget("Berichtsheft-Eintrag")} className="flex items-center justify-center gap-2 rounded-2xl bg-slate-100 px-4 py-3 text-sm font-bold text-slate-800"><FileText size={17} />Für PDF</button><button onClick={() => window.print()} className="flex items-center justify-center gap-2 rounded-2xl bg-slate-100 px-4 py-3 text-sm font-bold text-slate-800"><Printer size={17} />Drucken</button></div>{reportExportText && <CopyBox title="Berichtsheft-Export kopieren" text={reportExportText} />}</div></div></Card><Card><SectionTitle icon={Save} title="Gespeicherte Berichte" subtitle="Berichte werden lokal gespeichert." /><div className="grid gap-4 md:grid-cols-2">{savedReports.length === 0 && <div className="rounded-2xl bg-slate-50 p-4 text-sm font-bold text-slate-600">Noch keine Berichte gespeichert.</div>}{savedReports.map((entry) => <article key={entry.id} className="rounded-3xl bg-slate-50 p-5"><div className="flex flex-wrap items-center gap-2"><Badge>{entry.mode}</Badge><Badge>{entry.status}</Badge><Badge>{entry.orderId || "ohne Auftrag"}</Badge></div><p className="mt-3 text-xs font-bold text-slate-500">{entry.createdAt}</p><textarea readOnly value={entry.text} className="mt-3 h-32 w-full resize-none rounded-2xl border border-slate-200 bg-white p-3 text-sm leading-6" /><div className="mt-3 grid gap-2 md:grid-cols-2"><button onClick={() => { setReportExportText(entry.text); showNotice("Bericht für Export ausgewählt."); }} className="rounded-2xl bg-slate-950 px-4 py-2 text-sm font-bold text-white">Export auswählen</button><button onClick={() => deleteReport(entry.id)} className="rounded-2xl bg-rose-100 px-4 py-2 text-sm font-bold text-rose-800">Bericht löschen</button></div></article>)}</div></Card></div>)}
   {active === "safety" && screen(<div className="grid gap-5 lg:grid-cols-[0.8fr_1.2fr]"><Card><SectionTitle icon={AlertTriangle} title="Sicherheits- und Warnsystem" subtitle="Kritische Kombinationen werden sichtbar gemacht." /><div className="space-y-3">{["WDVS: Lastabtragung und Abdichtung prüfen", "Markise: hohe Hebel- und Zugkräfte", "Elektro: Spannungsfreiheit und fachgerechte Messung", "Wind: Herstellerangaben und Sensorik beachten"].map((w) => <div key={w} className="rounded-2xl bg-amber-50 p-4 text-sm font-bold text-amber-900">{w}</div>)}</div></Card><Card><SectionTitle icon={ShieldCheck} title="Warnhinweise" subtitle="Nicht als automatische Freigabe nutzen." /><p className="text-sm leading-6 text-slate-600">Herstellerangaben, Untergrund, Befestigung, Gebäudehöhe und Fachprüfung bleiben verbindlich.</p></Card></div>)}
-  {active === "norms" && screen(<Card><SectionTitle icon={ShieldCheck} title="Normen, Sicherheit & Windklassen" subtitle="Erweitert als praxisnahe Orientierung. Herstellerangaben und Fachprüfung bleiben verbindlich." /><div className="mb-5 grid gap-3 md:grid-cols-3"><div className="rounded-3xl bg-slate-50 p-4"><p className="text-3xl font-black">{allNorms.length}</p><p className="text-sm text-slate-600">Hinweise</p></div><div className="rounded-3xl bg-amber-50 p-4 text-sm font-bold leading-6 text-amber-900">Keine automatische Freigabe. Immer Produktgröße, Untergrund, Lage, Gebäudehöhe und Herstellerdaten prüfen.</div><div className="rounded-3xl bg-slate-50 p-4"><p className="text-3xl font-black">Wind</p><p className="text-sm text-slate-600">immer dokumentieren</p></div></div><div className="grid gap-4 md:grid-cols-2">{allNorms.map((n) => <article key={n.title} className="rounded-3xl bg-slate-50 p-5"><h3 className="font-black">{n.title}</h3><p className="mt-2 text-sm leading-6 text-slate-600">{n.text}</p><div className="mt-3">{checkButton(`norm-${n.title}`, "im Auftrag beachtet / geprüft")}</div></article>)}</div></Card>)}
-  {active === "pdf" && screen(<div className="space-y-5"><Card className="no-print"><SectionTitle icon={Download} title="PDF-Vorlagen ausfüllen" subtitle="Wähle eine Vorlage und fülle die passenden Felder aus. Beim Drucken/PDF-Export wird nur die Vorschau gedruckt — nicht die App-Oberfläche." /><div className="grid gap-4 lg:grid-cols-[0.7fr_1.3fr]"><div className="rounded-3xl bg-slate-50 p-4"><label className="text-sm font-bold text-slate-800">PDF-Vorlage<select value={pdfTarget} onChange={(e) => setPdfTarget(e.target.value)} className="mt-2 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-bold">{Object.keys(pdfTemplateDefinitions).map((name) => <option key={name}>{name}</option>)}</select></label><p className="mt-3 text-sm leading-6 text-slate-600">{currentPdfTemplate.description}</p><div className="mt-4 rounded-2xl bg-white p-3 text-xs font-bold leading-5 text-slate-500">Aktiver Auftrag: {selectedOrder?.id || "-"} · {selectedOrder?.customer || "-"} · {selectedProduct.name}</div></div><div className="grid gap-3 md:grid-cols-2">{currentPdfTemplate.fields.map((field) => field.type === "textarea" ? <TextArea key={field.key} label={field.label} value={getPdfValue(field)} onChange={(value) => setPdfField(field.key, value)} placeholder={field.placeholder || ""} /> : field.type === "select" ? <label key={field.key} className="block rounded-2xl bg-slate-50 p-4 text-sm font-bold text-slate-800">{field.label}<select value={getPdfValue(field)} onChange={(e) => setPdfField(field.key, e.target.value)} className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm font-medium outline-none focus:border-slate-950"><option value="">Bitte auswählen</option>{field.options.map((option) => <option key={option}>{option}</option>)}</select></label> : <Field key={field.key} label={field.label} type={field.type || "text"} value={getPdfValue(field)} onChange={(value) => setPdfField(field.key, value)} placeholder={field.placeholder || ""} />)}</div></div><div className="mt-5 rounded-2xl bg-slate-50 p-3 text-xs font-bold text-slate-600">Automatischer Dateiname: {pdfFileName}</div><div className="mt-3 grid gap-3 md:grid-cols-4"><button onClick={() => navigator.clipboard?.writeText(pdfPreviewLines)} className="flex items-center justify-center gap-2 rounded-2xl bg-slate-100 px-4 py-3 text-sm font-bold text-slate-800"><Copy size={18} />PDF-Text kopieren</button><button onClick={savePdfDocument} className="flex items-center justify-center gap-2 rounded-2xl bg-emerald-100 px-4 py-3 text-sm font-bold text-emerald-800"><Save size={18} />Dokument speichern</button><button onClick={resetPdfTemplate} className="flex items-center justify-center gap-2 rounded-2xl bg-slate-100 px-4 py-3 text-sm font-bold text-slate-800"><RefreshCw size={18} />Vorlage zurücksetzen</button><button onClick={() => window.print()} className="flex items-center justify-center gap-2 rounded-2xl bg-slate-950 px-4 py-3 text-sm font-bold text-white"><Printer size={18} />Nur Vorschau als PDF</button></div></Card><Card className="print-area"><SectionTitle icon={FileText} title="PDF-Vorschau" subtitle="Nur dieser Bereich erscheint später in der PDF." /><div className="rounded-3xl border border-slate-200 bg-white p-6 text-slate-950 shadow-sm md:p-8"><pre className="whitespace-pre-wrap break-words font-sans text-sm leading-7">{pdfPreviewLines}</pre></div></Card><Card className="no-print"><SectionTitle icon={FileText} title="Gespeicherte PDF-Dokumente" subtitle="Dokumente werden dem Auftrag zugeordnet und können einen Status bekommen." /><div className="grid gap-3 md:grid-cols-2">{pdfDocuments.length === 0 && <div className="rounded-2xl bg-slate-50 p-4 text-sm font-bold text-slate-600">Noch keine PDF-Dokumente gespeichert.</div>}{pdfDocuments.map((doc) => <article key={doc.id} className="rounded-3xl bg-slate-50 p-4"><div className="flex flex-wrap items-center gap-2"><Badge>{doc.template}</Badge><Badge>{doc.status}</Badge></div><h3 className="mt-2 font-black">{doc.fileName}</h3><p className="mt-1 text-xs text-slate-500">{doc.createdAt} · Auftrag {doc.orderId}</p><select value={doc.status} onChange={(e) => updatePdfDocumentStatus(doc.id, e.target.value)} className="mt-3 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-bold"><option>Entwurf</option><option>erstellt</option><option>gesendet</option><option>unterschrieben</option><option>archiviert</option></select></article>)}</div></Card></div>)}
-  {active === "offline" && screen(<div className="space-y-5"><Card><SectionTitle icon={WifiOff} title="Offline & Sync-Warteschlange" subtitle="Die App erkennt online/offline automatisch. Änderungen werden lokal gepuffert und später synchronisiert." /><div className={`rounded-3xl p-5 text-sm font-black ${offline ? "bg-amber-50 text-amber-900" : "bg-emerald-50 text-emerald-900"}`}>{offline ? "Offline erkannt: Änderungen bleiben lokal gespeichert und werden später synchronisiert." : "Online: Auto-Sync ist bereit."}</div><div className="mt-5 grid gap-3 md:grid-cols-4"><div className="rounded-3xl bg-slate-50 p-4"><p className="text-3xl font-black">{syncQueue.length}</p><p className="text-sm text-slate-600">Sync-Einträge</p></div><div className="rounded-3xl bg-slate-50 p-4"><p className="text-3xl font-black">{syncQueue.filter((i) => i.status !== "synchronisiert").length}</p><p className="text-sm text-slate-600">offen</p></div><div className="rounded-3xl bg-slate-50 p-4"><p className="text-3xl font-black">{syncLog.length}</p><p className="text-sm text-slate-600">Sync-Logs</p></div><div className="rounded-3xl bg-slate-50 p-4"><p className="text-3xl font-black">{offline ? "Nein" : "Ja"}</p><p className="text-sm text-slate-600">online</p></div></div><div className="mt-5 grid gap-3 md:grid-cols-3"><button onClick={() => saveAppToSupabase(null, { quiet: false })} className="rounded-2xl bg-slate-950 px-4 py-3 text-sm font-bold text-white">Jetzt synchronisieren</button><button onClick={clearSyncedQueue} className="rounded-2xl bg-slate-100 px-4 py-3 text-sm font-bold">Erledigte ausblenden</button><button onClick={() => setSyncQueue([])} className="rounded-2xl bg-rose-100 px-4 py-3 text-sm font-bold text-rose-800">Warteschlange leeren</button></div></Card><Card><SectionTitle icon={ClipboardList} title="Warteschlange" subtitle="Welche Änderungen noch verarbeitet werden." /><div className="space-y-3">{syncQueue.length === 0 && <div className="rounded-2xl bg-slate-50 p-4 text-sm font-bold text-slate-600">Keine offenen Sync-Einträge.</div>}{syncQueue.map((item) => <div key={item.id} className="rounded-2xl bg-slate-50 p-4 text-sm leading-6"><div className="flex flex-wrap items-center gap-2"><Badge>{item.status}</Badge><strong>{item.action}</strong><span className="text-slate-500">{item.createdAt}</span></div></div>)}</div></Card></div>)}
-  {active === "rights" && screen(<div className="space-y-5"><Card><SectionTitle icon={Settings} title="Rechte-System" subtitle="Kompakter und klarer: Was darf welche Rolle? Später zusätzlich in Supabase RLS absichern." /><div className="overflow-x-auto rounded-3xl border border-slate-100"><table className="w-full min-w-[900px] text-left text-sm"><thead className="bg-slate-50 text-xs uppercase text-slate-500"><tr><th className="p-3">Bereich</th>{["dev", "meister", "buero", "vorarbeiter", "monteur", "azubi", "kunde"].map((r) => <th key={r} className="p-3">{roleLabel(r)}</th>)}</tr></thead><tbody>{rolePermissionMatrix.map((row) => <tr key={row.area} className="border-t border-slate-100"><td className="p-3 font-black">{row.area}</td>{["dev", "meister", "buero", "vorarbeiter", "monteur", "azubi", "kunde"].map((r) => <td key={r} className="p-3 text-slate-600">{row[r]}</td>)}</tr>)}</tbody></table></div></Card><Card><SectionTitle icon={ShieldCheck} title="Rollenmodule" subtitle="Welche App-Bereiche pro Rolle sichtbar sind." /><div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{roles.map((r) => <article key={r.id} className="rounded-3xl bg-slate-50 p-5"><h3 className="font-black">{r.label}</h3><p className="mt-2 text-sm text-slate-600">{r.description}</p><div className="mt-3 flex flex-wrap gap-2">{(r.id === "dev" ? navItems : navItems.filter((n) => n.roles.includes(r.id))).map((n) => <Badge key={n.id}>{n.label}</Badge>)}</div></article>)}</div></Card><Card><SectionTitle icon={AlertTriangle} title="Empfohlene Sicherheitsregeln" subtitle="Frontend-Rechte sind Bedienlogik. Echte Sicherheit kommt über Datenbankregeln." /><div className="grid gap-3 md:grid-cols-3">{["Firma sieht nur eigene Daten", "Kunde sieht nur eigene Aufträge", "Monteur sieht nur Zuweisungen", "Azubi sieht eigene Berichte", "Büro/Meister verwaltet Firma", "Dev nur für Entwicklung"].map((item) => <div key={item} className="rounded-2xl bg-amber-50 p-4 text-sm font-bold text-amber-900">{item}</div>)}</div></Card></div>)}
-  {active === "company" && screen(<div className="space-y-5"><div className="grid gap-5 lg:grid-cols-[0.9fr_1.1fr]"><Card><SectionTitle icon={UserRound} title="Firma & Team" subtitle="Kompakteres Verzeichnis: Personen anlegen, Code kopieren, Status ändern und Baustellen sehen." /><div className="rounded-3xl bg-slate-50 p-4"><p className="text-xs font-bold uppercase text-slate-500">Betrieb</p><Field label="Firmenname" value={company.name} onChange={(v) => setCompany({ ...company, name: v })} /><p className="mt-3 rounded-2xl bg-white p-3 text-sm font-bold leading-6 text-slate-600">Jede Person hat einen eigenen Zugangscode. Kunden brauchen keine Freigabe und sehen nur ihr Kundenportal.</p></div></Card><Card><SectionTitle icon={Plus} title="Person erstellen" subtitle="Vorarbeiter, Monteur, Azubi oder Kunde direkt anlegen." /><div className="grid gap-3 md:grid-cols-2"><Field label="Name" value={personForm.name} onChange={(v) => setPersonForm({ ...personForm, name: v })} placeholder="z. B. Max Mustermann" /><label className="block rounded-2xl bg-slate-50 p-4 text-sm font-bold">Rolle<select value={personForm.role} onChange={(e) => setPersonForm({ ...personForm, role: e.target.value })} className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-3">{teamRoleOptions.map((r) => <option key={r.id} value={r.id}>{r.label}</option>)}</select></label><Field label="Telefon" value={personForm.phone} onChange={(v) => setPersonForm({ ...personForm, phone: v })} placeholder="optional" /><Field label={personForm.role === "kunde" ? "Adresse" : "Adresse / Bereich"} value={personForm.address} onChange={(v) => setPersonForm({ ...personForm, address: v })} placeholder={personForm.role === "kunde" ? "z. B. Musterstraße 1" : "optional"} />{personForm.role !== "kunde" && <Field label="Kolonne / Team" value={personForm.team} onChange={(v) => setPersonForm({ ...personForm, team: v })} placeholder="z. B. Kolonne 1" />}{personForm.role === "azubi" && <label className="block rounded-2xl bg-slate-50 p-4 text-sm font-bold">Ausbildungsjahr<select value={personForm.trainingYear} onChange={(e) => setPersonForm({ ...personForm, trainingYear: e.target.value })} className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-3"><option value="1">1. Ausbildungsjahr</option><option value="2">2. Ausbildungsjahr</option><option value="3">3. Ausbildungsjahr</option></select></label>}</div><button onClick={createCompanyPerson} className="mt-4 w-full rounded-2xl bg-slate-950 px-4 py-3 text-sm font-black text-white">Person anlegen & Code erzeugen</button></Card></div><Card><SectionTitle icon={Search} title="Kompaktes Verzeichnis" subtitle="Weniger Karten, mehr Übersicht. Code kann direkt kopiert werden." /><div className="mb-4 flex items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3"><Search size={18} /><input value={teamSearch} onChange={(e) => setTeamSearch(e.target.value)} placeholder="Suchen: Name, Code, Rolle, Status ..." className="w-full outline-none" /></div><div className="overflow-x-auto rounded-3xl border border-slate-100"><table className="w-full min-w-[780px] text-left text-sm"><thead className="bg-slate-50 text-xs uppercase text-slate-500"><tr><th className="p-3">Name</th><th className="p-3">Rolle</th><th className="p-3">Bereich/Adresse</th><th className="p-3">Code</th><th className="p-3">Baustellen</th><th className="p-3">Aktionen</th></tr></thead><tbody>{filteredCompanyPeople.map((p) => { const assignedCount = orders.filter((o) => (o.assignedMemberIds || []).includes(p.id) || o.customerPersonId === p.id).length; return <tr key={p.id} className="border-t border-slate-100"><td className="p-3 font-black">{p.name}<div className="text-xs font-bold text-slate-400">{p.status}</div>{p.role === "azubi" && <div className="mt-2"><input type="range" min="0" max="100" value={p.progress || 0} onChange={(e) => updateAzubiProgress(p.id, e.target.value)} className="w-full" /><span className="text-xs font-bold text-slate-500">{p.progress || 0}% · {p.trainingYear || "?"}. Jahr</span></div>}</td><td className="p-3">{personRoleLabel(p.role)}</td><td className="p-3 text-slate-600">{p.role === "kunde" ? (p.address || "ohne Adresse") : (p.team || p.address || "ohne Bereich")}</td><td className="p-3"><button onClick={() => navigator.clipboard?.writeText(p.accessCode)} className="rounded-2xl bg-slate-950 px-3 py-2 text-xs font-black text-white">{p.accessCode}</button></td><td className="p-3">{assignedCount}</td><td className="p-3"><div className="flex flex-wrap gap-2"><button onClick={() => setPersonStatus(p.id, p.status === "aktiv" ? "inaktiv" : "aktiv")} className="rounded-xl bg-slate-100 px-3 py-2 text-xs font-bold">{p.status === "aktiv" ? "deaktivieren" : "aktivieren"}</button><button onClick={() => regeneratePersonCode(p.id)} className="rounded-xl bg-slate-100 px-3 py-2 text-xs font-bold">Code neu</button><button onClick={() => deletePerson(p.id)} className="rounded-xl bg-rose-100 px-3 py-2 text-xs font-bold text-rose-800">Löschen</button></div></td></tr>; })}</tbody></table></div></Card></div>)}
+    {active === "norms" && screen(<NormsPage checkButton={checkButton} moduleChecks={moduleChecks} selectedOrder={selectedOrder} selectedProduct={selectedProduct} />)}
+    {active === "pdf" && screen(<PdfExportPage currentPdfTemplate={currentPdfTemplate} getPdfValue={getPdfValue} pdfDocuments={pdfDocuments} pdfFileName={pdfFileName} pdfPreviewLines={pdfPreviewLines} pdfTarget={pdfTarget} pdfTemplateDefinitions={pdfTemplateDefinitions} resetPdfTemplate={resetPdfTemplate} savePdfDocument={savePdfDocument} selectedOrder={selectedOrder} selectedProduct={selectedProduct} setPdfField={setPdfField} setPdfTarget={setPdfTarget} updatePdfDocumentStatus={updatePdfDocumentStatus} />)}
+    {active === "rights" && screen(<RightsPage navItems={navItems} />)}
+  {active === "company" && screen(<CompanyTeamPage canManage={canViewLearningTeam} company={company} companyPeople={companyPeople} createCompanyPerson={createCompanyPerson} onArchivePerson={archivePerson} onRegenerateCode={regeneratePersonCode} onSetPersonStatus={setPersonStatus} onUpdatePerson={updateCompanyPerson} orders={orders} personForm={personForm} personRoleLabel={personRoleLabel} setCompany={setCompany} setPersonForm={setPersonForm} showNotice={showNotice} teamRoleOptions={teamRoleOptions} updateAzubiProgress={updateAzubiProgress} />)}
   {active === "planning" && screen(<div className="grid gap-5 lg:grid-cols-[0.9fr_1.1fr]"><Card><SectionTitle icon={BriefcaseBusiness} title="Baustellenplanung" subtitle="Aufträge werden Vorarbeitern, Monteuren, Azubis und Kunden zugewiesen. Danach sehen Code-Logins nur ihre passenden Baustellen." /><div className="space-y-3">{orders.map((o) => <button key={o.id} onClick={() => setSelectedOrderId(o.id)} className={`w-full rounded-3xl border p-4 text-left ${selectedOrder?.id === o.id ? "border-slate-950 bg-white shadow-md" : "border-slate-100 bg-slate-50"}`}><div className="flex items-center justify-between"><strong>{o.date} {o.time} · {o.customer}</strong><Badge>{o.status}</Badge></div><p className="mt-1 text-sm text-slate-600">{o.address}</p><p className="mt-2 text-xs font-bold text-slate-500">Team: {(o.assignedMemberIds || []).map((id) => companyPeople.find((p) => p.id === id)?.name).filter(Boolean).join(", ") || o.assignedTo || "noch niemand"}</p></button>)}</div></Card><Card><SectionTitle icon={UserRound} title="Zuweisung für aktiven Auftrag" subtitle="Wähle Teammitglieder und Kunden aus dem Firmenverzeichnis." /><div className="mb-4 rounded-3xl bg-slate-50 p-4"><h3 className="font-black">{selectedOrder?.id} · {selectedOrder?.customer}</h3><p className="mt-1 text-sm text-slate-600">{selectedProduct.name} · {selectedOrder?.date} {selectedOrder?.time}</p></div><p className="mb-2 text-xs font-bold uppercase text-slate-500">Team zuweisen</p><div className="space-y-2">{teamMembers.map((p) => <label key={p.id} className="flex items-center justify-between gap-3 rounded-2xl bg-slate-50 p-3 text-sm font-bold"><span>{p.name} · {personRoleLabel(p.role)}</span><input type="checkbox" checked={(selectedOrder?.assignedMemberIds || []).includes(p.id)} onChange={() => toggleAssignment(p.id)} className="h-5 w-5 accent-slate-950" /></label>)}</div><p className="mb-2 mt-5 text-xs font-bold uppercase text-slate-500">Kunde zuweisen</p><div className="space-y-2">{companyCustomers.map((p) => <button key={p.id} onClick={() => assignCustomerToOrder(p.id)} className={`w-full rounded-2xl p-3 text-left text-sm font-bold ${selectedOrder?.customerPersonId === p.id ? "bg-slate-950 text-white" : "bg-slate-50"}`}>{p.name} · {p.status} · {p.address || "ohne Adresse"}</button>)}</div></Card></div>)}
-
-  {active === "portal" && screen(<div className="space-y-5"><Card><SectionTitle icon={Home} title="Kundenportal" subtitle="Einfache Kundenansicht mit anklickbaren Terminen, Status, Pflegehinweisen und Dokumenten." /><button onClick={() => setActive("portal")} className="w-full rounded-3xl bg-slate-50 p-4 text-left hover:bg-white hover:shadow"><div className="flex flex-wrap items-center justify-between gap-3"><div><p className="text-xs font-bold uppercase text-slate-500">Direktbereich</p><h3 className="text-xl font-black">Meine Termine & Aufträge</h3><p className="mt-1 text-sm text-slate-600">Anklicken, Auftrag öffnen oder Termin bestätigen.</p></div><ChevronRight /></div></button><div className="mt-4 grid gap-3 md:grid-cols-3"><div className="rounded-3xl bg-slate-50 p-4"><p className="text-3xl font-black">{currentCustomerOrders.length}</p><p className="text-sm text-slate-600">Aufträge</p></div><div className="rounded-3xl bg-slate-50 p-4"><p className="text-3xl font-black">{pdfDocuments.filter((doc) => currentCustomerOrders.some((o) => o.id === doc.orderId)).length}</p><p className="text-sm text-slate-600">Dokumente</p></div><div className="rounded-3xl bg-slate-50 p-4"><p className="text-3xl font-black">{allMaintenanceTips.length}</p><p className="text-sm text-slate-600">Pflegehinweise</p></div></div></Card><div className="grid gap-5 lg:grid-cols-[1fr_0.8fr]"><Card><SectionTitle icon={BriefcaseBusiness} title="Meine Termine & Aufträge" subtitle="Ein Auftrag ist anklickbar. Kunden können bestätigen oder einen Wunsch vormerken." /><div className="space-y-3">{currentCustomerOrders.map((o) => <article key={o.id} className="rounded-3xl bg-slate-50 p-5"><button onClick={() => openCustomerOrder(o)} className="w-full text-left"><div className="flex flex-wrap items-center justify-between gap-2"><h3 className="font-black">{o.date} {o.time} · {o.customer}</h3><Badge>{o.customerConfirmed ? "Termin bestätigt" : o.status}</Badge></div><p className="mt-2 text-sm text-slate-600">{o.address}</p><p className="mt-2 text-sm font-bold">{allProductTypes.find((p) => p.id === o.product)?.name}</p></button><div className="mt-3 grid gap-2 md:grid-cols-2">{customerPortalActions.slice(0,4).map((action) => <button key={action} onClick={() => customerPortalAction(action, o)} className="rounded-2xl bg-white px-3 py-2 text-xs font-bold text-slate-700 hover:bg-slate-950 hover:text-white">{action}</button>)}</div></article>)}{currentCustomerOrders.length === 0 && <div className="rounded-2xl bg-slate-50 p-4 text-sm font-bold text-slate-600">Noch kein Auftrag zugeordnet.</div>}</div></Card><Card><SectionTitle icon={RefreshCw} title="Pflege & Dokumente" subtitle="Wichtige Hinweise und PDFs zum Auftrag." /><div className="space-y-3">{allMaintenanceTips.slice(0,6).map((tip) => <button key={`${tip.product}-${tip.title}`} onClick={() => setActive("maintenance")} className="w-full rounded-2xl bg-slate-50 p-4 text-left hover:bg-white hover:shadow"><h3 className="font-black">{tip.product}: {tip.title}</h3><p className="mt-2 text-sm leading-6 text-slate-600">{tip.steps.join(" · ")}</p></button>)}</div><div className="mt-5 space-y-2">{pdfDocuments.filter((doc) => currentCustomerOrders.some((o) => o.id === doc.orderId)).map((doc) => <button key={doc.id} onClick={() => setActive("pdf")} className="w-full rounded-2xl bg-emerald-50 p-3 text-left text-sm font-bold text-emerald-900">{doc.fileName} · {doc.status}</button>)}</div></Card></div></div>)}
+    {active === "portal" && screen(<CustomerPortalPage currentCustomerOrders={currentCustomerOrders} customerDocuments={currentCustomerDocuments} confirmCustomerAppointment={confirmCustomerAppointment} openCustomerOrder={openCustomerOrder} />)}
   {active === "azubiPlan" && screen(<div className="space-y-5">
     <Card><SectionTitle icon={GraduationCap} title="Azubi-Lernplan" subtitle="Lernmodule nach Ausbildungsjahr, Fortschritt und nächster Aufgabe." />
       <div className="grid gap-3 md:grid-cols-4"><div className="rounded-3xl bg-slate-50 p-4"><p className="text-3xl font-black">{currentPerson?.progress || companyPeople.find((p) => p.role === "azubi")?.progress || 0}%</p><p className="text-sm text-slate-600">Lernfortschritt</p></div><div className="rounded-3xl bg-slate-50 p-4"><p className="text-3xl font-black">{myReports.filter((r) => r.status !== "Freigegeben").length}</p><p className="text-sm text-slate-600">offene Berichte</p></div><div className="rounded-3xl bg-slate-50 p-4"><p className="text-3xl font-black">{quizCards.length}</p><p className="text-sm text-slate-600">Quizfragen</p></div><div className="rounded-3xl bg-slate-50 p-4"><p className="text-3xl font-black">{visibleOrders.length}</p><p className="text-sm text-slate-600">Baustellen</p></div></div>
