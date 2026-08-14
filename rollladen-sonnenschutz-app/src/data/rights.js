@@ -57,7 +57,8 @@ export const rolePermissionMatrix = [
     group: "Team",
     permissions: [
       { area: "Personen und Codes verwalten", dev: access("allowed", "Persönlich"), meister: access("allowed", "Persönlich"), buero: access("allowed", "Persönlich"), vorarbeiter: access("limited", "Team lesen"), monteur: access("denied", "-"), azubi: access("denied", "-"), kunde: access("denied", "-") },
-      { area: "Baustellen zuweisen", dev: access("allowed", "Alle"), meister: access("allowed", "Alle"), buero: access("allowed", "Alle"), vorarbeiter: access("allowed", "Eigene Kolonne"), monteur: access("limited", "Zuweisung sehen"), azubi: access("limited", "Zuweisung sehen"), kunde: access("denied", "-") },
+      { area: "Baustellen disponieren", dev: access("allowed", "Alle"), meister: access("allowed", "Alle"), buero: access("allowed", "Alle"), vorarbeiter: access("limited", "Eigene Kolonne und Status"), monteur: access("limited", "Eigene Heute-Ansicht"), azubi: access("limited", "Eigene Baustellen"), kunde: access("denied", "-") },
+      { area: "Abwesenheiten verwalten", dev: access("allowed", "Alle"), meister: access("allowed", "Alle"), buero: access("allowed", "Alle"), vorarbeiter: access("limited", "Eigene Kolonne lesen"), monteur: access("denied", "-"), azubi: access("denied", "-"), kunde: access("denied", "-") },
     ],
   },
   {

@@ -43,6 +43,8 @@ export function inferSyncMetadata(action = "Lokale Änderung", data = {}) {
   else if (normalized.includes("pdf") || normalized.includes("dokument")) type = "pdfMetadata";
   else if (normalized.includes("ersatzteil")) type = "partRequest";
   else if (normalized.includes("diagnose")) type = "diagnosis";
+  else if (normalized.includes("abwesen")) type = "absence";
+  else if (normalized.includes("baustellenplanung") || normalized.includes("eingeplant") || normalized.includes("verschoben")) type = "planning";
   else if (normalized.includes("person") || normalized.includes("team.")) type = "person";
   else if (normalized.includes("firma") || normalized.includes("company")) type = "company";
   else if (normalized.includes("auftrag") || normalized.includes("termin")) type = "order";
@@ -50,6 +52,7 @@ export function inferSyncMetadata(action = "Lokale Änderung", data = {}) {
   const recordId = data.recordId
     || data.orderId
     || data.personId
+    || data.absenceId
     || data.sketchId
     || data.reportId
     || data.requestId

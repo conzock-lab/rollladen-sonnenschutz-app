@@ -111,7 +111,7 @@ export const navigationGroups = [
     defaultId: "company",
     items: [
       { id: "company", label: "Firma & Team", icon: UserRound, roles: ["dev", "meister", "buero"], keywords: ["mitarbeiter", "team", "code", "firma"] },
-      { id: "planning", label: "Baustellen- / Teamplanung", icon: ClipboardList, roles: ["dev", "meister", "buero", "vorarbeiter"], keywords: ["kolonne", "team zuweisen", "planung"] },
+      { id: "planning", label: "Baustellenplanung", icon: ClipboardList, roles: ["dev", "meister", "buero", "vorarbeiter"], keywords: ["tagesplanung", "wochenplanung", "kolonne", "team zuweisen", "abwesenheit", "nacharbeit"] },
       { id: "rights", label: "Rechte & Rollen", icon: ShieldCheck, roles: ["dev", "meister", "buero"], keywords: ["rolle", "berechtigung", "rls"] },
     ],
   },

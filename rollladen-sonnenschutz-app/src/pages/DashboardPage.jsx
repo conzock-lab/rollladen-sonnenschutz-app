@@ -5,7 +5,7 @@ import Card from "../components/Card";
 import SectionTitle from "../components/SectionHeader";
 import { productTypes } from "../data/products";
 
-export default function DashboardPage({ activeOrders, allowedNav, appRole, canOpenModule, company, learningDashboard = {}, openReports, orders, photos, roleHome, setActive, setSelectedOrderId, todaysOrders, visibleOrders }) {
+export default function DashboardPage({ activeOrders, allowedNav, appRole, canOpenModule, company, learningDashboard = {}, openReports, orders, photos, planningSummary = {}, roleHome, setActive, setSelectedOrderId, todaysOrders, visibleOrders }) {
   if (appRole === "kunde") {
     const sortedOrders = [...visibleOrders].sort((left, right) => `${left.date || ""} ${left.time || ""}`.localeCompare(`${right.date || ""} ${right.time || ""}`));
     const nextOrder = sortedOrders.find((order) => new Date(`${order.date || "1970-01-01"}T${order.time || "00:00"}`).getTime() >= Date.now());
@@ -53,6 +53,19 @@ export default function DashboardPage({ activeOrders, allowedNav, appRole, canOp
         <div className="rounded-3xl bg-slate-50 p-4"><p className="text-3xl font-black">{allowedNav.length}</p><p className="text-sm text-slate-600">verfügbare Bereiche</p></div>
       </div>
       <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-4">{roleHome.focus.map((item) => <div key={item} className="rounded-2xl bg-slate-950 p-4 text-sm font-bold text-white">{item}</div>)}</div>
+    </Card>
+    <Card>
+      <SectionTitle icon={CalendarDays} title="Heute in der Einsatzplanung" subtitle="Baustellen, Teams, Materialprobleme und Nacharbeiten auf einen Blick." />
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-6">
+        {[
+          ["Geplant", planningSummary.plannedToday || 0],
+          ["Aktive Monteure", planningSummary.activePeople || 0],
+          ["Ungeplant", planningSummary.unplanned || 0],
+          ["Materialprobleme", planningSummary.materialProblems || 0],
+          ["Nacharbeiten", planningSummary.rework || 0],
+          ["Abschluss offen", planningSummary.openClosures || 0],
+        ].map(([label, value]) => <button key={label} type="button" onClick={() => setActive(canOpenModule("planning") ? "planning" : "today")} className="rounded-2xl bg-slate-50 p-4 text-left transition hover:bg-white hover:shadow-md"><strong className="text-2xl">{value}</strong><span className="mt-1 block text-xs font-bold text-slate-500">{label}</span></button>)}
+      </div>
     </Card>
     {appRole === "azubi" && <Card>
       <SectionTitle icon={GraduationCap} title="Mein Lernstand" subtitle="Offene und erledigte Module, Berichtsheft sowie die nächsten empfohlenen Themen." />
