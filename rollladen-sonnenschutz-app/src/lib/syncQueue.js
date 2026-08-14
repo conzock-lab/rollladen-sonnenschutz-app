@@ -34,10 +34,15 @@ export function inferSyncMetadata(action = "Lokale Änderung", data = {}) {
   else if (normalized.includes("foto")) type = "photoMetadata";
   else if (normalized.includes("aufmaß") || normalized.includes("mess")) type = "measurement";
   else if (normalized.includes("berichtsheft") || normalized.includes("bericht")) type = "reportBook";
+  else if (normalized.includes("quiz")) type = "quizProgress";
+  else if (normalized.includes("praxisfall")) type = "practiceCase";
+  else if (normalized.includes("lernaufgabe")) type = "learningAssignment";
+  else if (normalized.includes("lernkommentar")) type = "learningComment";
   else if (normalized.includes("lern")) type = "learningProgress";
   else if (normalized.includes("skizze")) type = "sketch";
   else if (normalized.includes("pdf") || normalized.includes("dokument")) type = "pdfMetadata";
   else if (normalized.includes("ersatzteil")) type = "partRequest";
+  else if (normalized.includes("diagnose")) type = "diagnosis";
   else if (normalized.includes("person") || normalized.includes("team.")) type = "person";
   else if (normalized.includes("firma") || normalized.includes("company")) type = "company";
   else if (normalized.includes("auftrag") || normalized.includes("termin")) type = "order";

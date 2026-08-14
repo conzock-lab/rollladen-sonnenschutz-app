@@ -37,12 +37,133 @@ const partCategoriesByDiagnosis = {
 
 const safetyCategories = ["Motor / Elektro", "Tor / Sicherheit"];
 
+export const diagnosisSymptomGroups = [
+  { id: "movement", label: "Bewegung", items: ["fährt nicht", "fährt nur eine Richtung", "läuft schief", "stoppt früh", "reversiert", "fährt selbstständig"] },
+  { id: "noise", label: "Geräusch", items: ["brummt", "klappert", "knackt", "schleift"] },
+  { id: "operation", label: "Bedienung", items: ["Funk reagiert nicht", "Sender verloren", "Taster ohne Funktion", "Gateway offline"] },
+  { id: "mechanics", label: "Mechanik", items: ["klemmt", "schwergängig", "verdreht", "Endleiste blockiert"] },
+  { id: "weather", label: "Wetter", items: ["Frost", "Wind", "Sonne / Automatik", "Feuchtigkeit"] },
+  { id: "product", label: "Produkt", items: ["Rollladen", "Markise", "Raffstore", "ZIP-Screen", "Insektenschutz", "Rolltor"] },
+];
+
+export const diagnosisSafetyLevels = Object.freeze({
+  BASIC: "Kunde darf prüfen",
+  PROFESSIONAL: "Nur Fachkraft prüfen",
+  STOP: "Anlage nicht weiter betreiben",
+});
+
+const diagnosisProfiles = {
+  "motor-faehrt-nicht": { symptoms: ["fährt nicht", "Taster ohne Funktion"], safetyLevel: diagnosisSafetyLevels.PROFESSIONAL, causes: ["Bedienung oder Funkweg", "Spannungsversorgung oder Anschluss", "mechanische Blockade", "Motor, Bremse oder Endlage"], related: ["funk-reagiert-nicht", "motor-brummt"] },
+  "motor-brummt": { symptoms: ["brummt", "fährt nicht", "klemmt"], safetyLevel: diagnosisSafetyLevels.STOP, causes: ["Behang oder Führung blockiert", "Adapter, Mitnehmer oder Welle", "Motorbremse oder Motor", "Endlage ungünstig eingestellt"], related: ["motor-faehrt-nicht", "rollladen-schief"] },
+  "rollladen-schief": { symptoms: ["läuft schief", "klemmt", "schleift"], causes: ["Führung verschmutzt oder nicht parallel", "Lamelle oder Endleiste beschädigt", "Aufhängung ungleich", "Welle oder Lager auffällig"], related: ["rollladen-klemmt-unten", "motor-brummt"] },
+  "funk-reagiert-nicht": { symptoms: ["Funk reagiert nicht", "Taster ohne Funktion"], causes: ["Batterie, Kanal oder Sender", "Reichweite oder Funkstörung", "Zuordnung von Sender und Empfänger", "Versorgung von Empfänger oder Motor"], related: ["sender-verloren", "gateway-offline", "motor-faehrt-nicht"] },
+  "markise-stoppt": { symptoms: ["stoppt früh", "Wind", "Sonne / Automatik"], causes: ["Windautomatik oder Sensorpriorität", "Hindernis oder Schwergängigkeit", "Motorschutz", "Endlage oder Tuchwicklung"], related: ["sensorik-falsch", "markise-schliesst-schief"] },
+  "zipscreen-klemmt": { symptoms: ["klemmt", "läuft schief", "schleift"], safetyLevel: diagnosisSafetyLevels.STOP, causes: ["Seitenschiene verschmutzt oder nicht parallel", "ZIP-Keder oder Einlauf beschädigt", "Tuchspannung oder Endlage", "Motor oder Mitnehmer"], related: ["motor-brummt"] },
+  "raffstore-wendet-falsch": { symptoms: ["fährt nur eine Richtung", "verdreht"], causes: ["Drehrichtung oder Steuerung", "Wendepunkt", "Leiterkordel oder Aufzugsband", "Lamellenpaket blockiert"], related: ["motor-eine-richtung", "raffstore-klappert"] },
+  "sensorik-falsch": { symptoms: ["Wind", "Sonne / Automatik", "fährt selbstständig"], causes: ["Sensor verschmutzt oder ungünstig positioniert", "Grenzwert oder Automatikmodus", "Funkverbindung oder Versorgung", "Gruppen- oder Szenenzuordnung"], related: ["anlage-faehrt-selbst", "markise-stoppt"] },
+  "rollladen-klemmt-unten": { symptoms: ["klemmt", "Endleiste blockiert", "läuft schief"], causes: ["Endleiste in Führung oder Fensterbank blockiert", "Führung verschmutzt", "Lamelle beschädigt", "Aufhängung oder Welle schief"], related: ["rollladen-schief", "frost-problem"] },
+  "frost-problem": { symptoms: ["Frost", "Endleiste blockiert", "fährt nicht"], safetyLevel: diagnosisSafetyLevels.STOP, causes: ["Endleiste angefroren", "Eis in der Führung", "Hinderniserkennung ausgelöst", "Endlage unter Spannung"], related: ["rollladen-klemmt-unten"] },
+  "gurt-schwer": { symptoms: ["schwergängig", "schleift", "verdreht"], causes: ["Gurt verdreht oder ausgefranst", "Gurtwickler schwergängig", "Gurtscheibe oder Lager", "Panzer läuft nicht frei"], related: ["rollladen-schief"] },
+  "sender-verloren": { symptoms: ["Sender verloren", "Funk reagiert nicht"], causes: ["Sender fehlt oder ist defekt", "Batterie oder Kanal", "Systemfamilie nicht eindeutig", "Empfängerzugang erforderlich"], related: ["funk-reagiert-nicht"] },
+  "markise-schliesst-schief": { symptoms: ["läuft schief", "stoppt früh"], causes: ["Gelenkarme unterschiedlich", "Tuchwicklung ungleich", "Konsole oder Neigung", "Endlage oder Kassettensitz"], related: ["markise-stoppt"] },
+  "raffstore-klappert": { symptoms: ["klappert", "Wind"], causes: ["Führung oder Seil nicht passend eingestellt", "Lamellen oder Clips lose", "Abstände ungünstig", "Windgrenze überschritten"], related: ["raffstore-wendet-falsch"] },
+  "rolltor-reversiert": { symptoms: ["reversiert", "stoppt früh", "fährt nicht"], safetyLevel: diagnosisSafetyLevels.STOP, causes: ["Sicherheitseinrichtung ausgelöst", "Lichtschranke verschmutzt oder verstellt", "Laufweg oder Führung blockiert", "Endlage oder Steuerung"], related: ["motor-faehrt-nicht"] },
+  "insektenschutz-klemmt": { symptoms: ["klemmt", "schwergängig", "schleift"], causes: ["Rahmen verzogen oder zu stramm", "Laufprofil verschmutzt", "Bürstendichtung ungünstig", "Beschlag, Rolle oder Griff"], related: [] },
+  "gateway-offline": { symptoms: ["Gateway offline", "Funk reagiert nicht"], causes: ["Gatewayversorgung", "lokales Netzwerk", "Konto- oder Gerätezuordnung", "lokaler Funkweg"], related: ["funk-reagiert-nicht", "anlage-faehrt-selbst"] },
+  "motor-eine-richtung": { symptoms: ["fährt nur eine Richtung", "Taster ohne Funktion"], safetyLevel: diagnosisSafetyLevels.PROFESSIONAL, causes: ["Bedienstelle oder Kanal", "Anschluss oder Empfänger", "Endlage", "Motor oder mechanischer Laufweg"], related: ["motor-faehrt-nicht", "raffstore-wendet-falsch"] },
+  "anlage-faehrt-selbst": { symptoms: ["fährt selbstständig", "Sonne / Automatik", "Wind"], causes: ["Zeitplan, Szene oder Zentralsteuerung", "Sensorpriorität", "Gruppenzuordnung", "Bedienstelle, Fremdsender oder Empfänger"], related: ["sensorik-falsch", "gateway-offline"] },
+};
+
+const electricalCategories = new Set(["Motor / Elektro", "Motor / Mechanik", "Funk / Steuerung", "Sensorik", "Smart Home", "Tor / Sicherheit"]);
+
+function structuredSteps(tree, profile) {
+  const safetyLevel = profile.safetyLevel || (safetyCategories.includes(tree.category) ? diagnosisSafetyLevels.PROFESSIONAL : diagnosisSafetyLevels.BASIC);
+  const electrical = electricalCategories.has(tree.category);
+  return [
+    {
+      id: "safety",
+      stage: "Sicherheit",
+      question: "Ist die Anlage gesichert und kann die Prüfung ohne weitere Gefährdung beginnen?",
+      explanation: safetyLevel === diagnosisSafetyLevels.BASIC ? "Nur sichtbare, gefahrlose Basisprüfungen durchführen." : "Bewegungsbereich freihalten und die Anlage nicht weiter belasten. Elektrische Arbeiten gehören zur Elektrofachkraft.",
+      answerOptions: ["Ja", "Nein", "Nicht geprüft"],
+      stopOn: "Nein",
+    },
+    {
+      id: "visible-damage",
+      stage: "Sichtbare Schäden",
+      question: "Sind Blockaden, lose Teile, Beschädigungen oder ungewöhnliche Spuren sichtbar?",
+      explanation: `Ohne Demontage prüfen: ${(tree.firstSteps || []).slice(0, 2).join("; ")}.`,
+      answerOptions: ["Ja", "Nein", "Nicht geprüft"],
+      toolHint: "Taschenlampe und Fotodokumentation",
+    },
+    {
+      id: "operation",
+      stage: "Bedienung",
+      question: "Tritt der Fehler bei jeder verfügbaren, sicheren Bedienmöglichkeit gleich auf?",
+      explanation: "Bedienstelle, Sender oder Handbedienung nur vergleichen, wenn dies ohne Eingriff sicher möglich ist.",
+      answerOptions: ["Ja", "Nein", "Nicht zutreffend", "Nicht geprüft"],
+      relatedDiagnosis: profile.related?.[0] || "",
+    },
+    {
+      id: "supply",
+      stage: electrical ? "Versorgung" : "Anlage und Umfeld",
+      question: electrical ? "Wurde die Spannungsversorgung fachgerecht geprüft?" : "Sind Einbausituation, Führung und Umfeld unauffällig?",
+      explanation: electrical ? "Keine Messung oder Verdrahtungsarbeit durch unqualifizierte Personen. Messergebnis nur dokumentieren." : "Befestigung, Abstände und Laufweg sichtbar prüfen.",
+      answerOptions: electrical ? ["Ja, durch Fachkraft", "Auffällig", "Nicht geprüft", "Nicht zutreffend"] : ["Ja", "Auffällig", "Nicht geprüft"],
+      toolHint: electrical ? "Geeignetes Prüfmittel nur durch qualifizierte Person" : tree.tools?.[0],
+    },
+    {
+      id: "control-radio",
+      stage: "Steuerung / Funk",
+      question: "Sind Kanal, Automatik, Sensorik und Zuordnung soweit vorhanden plausibel?",
+      explanation: "Zustand und Einstellungen dokumentieren. Kein pauschaler Reset ohne passende Herstellerunterlage.",
+      answerOptions: ["Ja", "Auffällig", "Nicht zutreffend", "Nicht geprüft"],
+      relatedDiagnosis: tree.category.includes("Funk") ? "gateway-offline" : "funk-reagiert-nicht",
+    },
+    {
+      id: "mechanics",
+      stage: "Mechanik",
+      question: "Sind Laufweg, Führung, Behang, Welle und bewegliche Teile frei und unauffällig?",
+      explanation: (tree.firstSteps || []).slice(1).join("; ") || "Mechanische Freigängigkeit nur bei gesicherter Anlage beurteilen.",
+      answerOptions: ["Ja", "Auffällig", "Nicht zutreffend", "Nicht geprüft"],
+      relatedPart: tree.partCategories?.[0] || "",
+    },
+    {
+      id: "specific",
+      stage: "Fehlerbild eingrenzen",
+      question: tree.start.q,
+      explanation: "Antwort als Hinweis werten und mit den bisherigen Beobachtungen abgleichen.",
+      answerOptions: ["Ja", "Nein", "Nicht geprüft"],
+      yesRecommendation: tree.start.yes,
+      noRecommendation: tree.start.no,
+      relatedPart: tree.partCategories?.[0] || "",
+    },
+  ];
+}
+
 function diagnosis(tree) {
+  const profile = diagnosisProfiles[tree.id] || {};
+  const productIds = tree.productIds || diagnosisProductsByCategory[tree.category] || [];
+  const partCategories = tree.partCategories || partCategoriesByDiagnosis[tree.id] || [];
+  const safetyLevel = tree.safetyLevel || profile.safetyLevel || (safetyCategories.includes(tree.category) ? diagnosisSafetyLevels.PROFESSIONAL : diagnosisSafetyLevels.BASIC);
+  const enrichedTree = { ...tree, productIds, partCategories };
   return {
-    ...tree,
-    productIds: tree.productIds || diagnosisProductsByCategory[tree.category] || [],
-    safety: tree.safety ?? safetyCategories.includes(tree.category),
-    partCategories: tree.partCategories || partCategoriesByDiagnosis[tree.id] || [],
+    ...enrichedTree,
+    productCategories: productIds,
+    manufacturerIds: tree.manufacturerIds || [],
+    motorCategories: tree.motorCategories || (electricalCategories.has(tree.category) ? [tree.category] : []),
+    symptoms: tree.symptoms || profile.symptoms || [],
+    keywords: tree.keywords || [tree.title, tree.category, ...(profile.symptoms || []), ...(tree.firstSteps || []), ...(tree.tools || [])],
+    safetyLevel,
+    safety: tree.safety ?? safetyLevel !== diagnosisSafetyLevels.BASIC,
+    partCategories,
+    requiredTools: tree.requiredTools || tree.tools || [],
+    possibleCauses: tree.possibleCauses || profile.causes || [tree.start.yes, tree.start.no],
+    relatedParts: tree.relatedParts || partCategories,
+    relatedDiagnostics: tree.relatedDiagnostics || profile.related || [],
+    learningTargets: tree.learningTargets || [tree.category],
+    knowledgeTargets: tree.knowledgeTargets || ["products", ...(electricalCategories.has(tree.category) ? ["motors"] : [])],
+    steps: tree.steps || structuredSteps(enrichedTree, profile),
     finishSteps: tree.finishSteps || ["Ursache oder Verdacht im Auftrag notiert", "Foto/Typenschild ergänzt", "Probefahrt oder sichere Außerbetriebnahme dokumentiert"],
   };
 }

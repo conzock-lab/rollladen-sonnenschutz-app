@@ -46,3 +46,24 @@ export async function saveCompanySnapshot({
     return { user: authData.user };
   })(), timeoutMs);
 }
+
+export async function saveLearningRecord({ client, learningRow, timeoutMs = 15000 }) {
+  if (!client) throw new Error("Supabase ist nicht konfiguriert.");
+  return withTimeout((async () => {
+    const { data: authData, error: authError } = await client.auth.getUser();
+    if (authError) throw authError;
+    if (!authData?.user) throw new Error("Keine gültige Cloud-Sitzung gefunden.");
+    const { error } = await client.from("learning_records").upsert({ ...learningRow, updated_by: authData.user.id });
+    if (error) throw error;
+    return { user: authData.user };
+  })(), timeoutMs);
+}
+
+export async function loadLearningRecord({ client, companyId, personId, timeoutMs = 15000 }) {
+  if (!client || !companyId || !personId) return null;
+  return withTimeout((async () => {
+    const { data, error } = await client.from("learning_records").select("data, updated_at").eq("company_id", companyId).eq("person_id", personId).maybeSingle();
+    if (error) throw error;
+    return data || null;
+  })(), timeoutMs);
+}
