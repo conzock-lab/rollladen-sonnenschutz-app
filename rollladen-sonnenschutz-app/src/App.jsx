@@ -72,7 +72,7 @@ import {
   restoreSyncQueue,
   retryFailedQueue,
 } from "./lib/syncQueue";
-import { saveCompanySnapshot } from "./services/supabaseSync";
+import { loadLearningRecord, saveCompanySnapshot, saveLearningRecord } from "./services/supabaseSync";
 import { buildPdfPreview, createPdfFileName } from "./lib/pdfHelpers";
 import { buildOrderOpenItems, getOrderSyncStatus } from "./lib/orderWorkspace";
 import { buildPartRequestText, createEmptyPartRequest, getPartPhotoRequirements } from "./lib/partsHelpers";
@@ -80,6 +80,9 @@ import { productTypes, checklistTemplates, dynamicChecklistRules, measurementReq
 import { normalizeOrderStatus } from "./data/orders";
 import { allManufacturers } from "./data/manufacturers";
 import { allDiagnosisTrees } from "./data/diagnosis";
+import { allMotorTypes } from "./data/motors";
+import { formatDiagnosisForOrder } from "./lib/diagnosisAssistant";
+import { createPracticeCaseFromDiagnosis, createPracticeCaseFromOrder, recordQuizAnswer } from "./lib/learningSystem";
 import { reportActivityTemplates, reportLearningFields, reportTechnicalTerms, quizCards, sketchCards, azubiLearningModules, allQuizCards, expandedLearningModules, learningModules, isLearningModuleComplete } from "./data/learningModules";
 import { roles, roleHomeConfig, teamRoleOptions } from "./data/rights";
 import DashboardPage from "./pages/DashboardPage";
@@ -89,6 +92,7 @@ import CloseOrderPage from "./pages/CloseOrderPage";
 import PdfExportPage from "./pages/PdfExportPage";
 import SketchesPage from "./pages/SketchesPage";
 import LearningPage from "./pages/LearningPage";
+import ReportBookPage from "./pages/ReportBookPage";
 import RightsPage from "./pages/RightsPage";
 import CompanyTeamPage from "./pages/CompanyTeamPage";
 import MaintenancePage from "./pages/MaintenancePage";
@@ -446,6 +450,10 @@ export default function App() {
   const [motorFavorites, setMotorFavorites] = useLocalStorage("rs-motor-favorites", []);
   const [technicalRecents, setTechnicalRecents] = useLocalStorage("rs-technical-recents", []);
   const [technicalNotes, setTechnicalNotes] = useLocalStorage("rs-technical-notes", {});
+  const [diagnosisFavorites, setDiagnosisFavorites] = useLocalStorage("rs-diagnosis-favorites", []);
+  const [diagnosisRecents, setDiagnosisRecents] = useLocalStorage("rs-diagnosis-recents", []);
+  const [diagnosisSessions, setDiagnosisSessions] = useLocalStorage("rs-diagnosis-sessions", []);
+  const [pendingPhotoDiagnosis, setPendingPhotoDiagnosis] = useState(null);
   const [calc, setCalc] = useState({ count: 3, material: 420, labor: 4, rate: 65, travel: 45, wdvs: 0, disposal: 0 });
   const [reportText, setReportText] = useState("Heute Vorbaurollladen montiert, Führungsschienen gebohrt, Motor eingestellt und Kunden eingewiesen.");
   const [reportMode, setReportMode] = useState("Tagesbericht");
@@ -479,6 +487,11 @@ export default function App() {
   const [pdfDocuments, setPdfDocuments] = useState(() => loadJson("rs-pdf-documents", []));
   const [moduleChecks, setModuleChecks] = useState(() => loadJson("rs-module-checks", {}));
   const [learningProgress, setLearningProgress] = useLocalStorage("rs-learning-progress", {});
+  const [quizProgress, setQuizProgress] = useLocalStorage("rs-quiz-progress", {});
+  const [learningPracticeCases, setLearningPracticeCases] = useLocalStorage("rs-learning-practice-cases", []);
+  const [learningAssignments, setLearningAssignments] = useLocalStorage("rs-learning-assignments", []);
+  const [learningComments, setLearningComments] = useLocalStorage("rs-learning-comments", []);
+  const [learningLists, setLearningLists] = useLocalStorage("rs-learning-lists", {});
   const [sketchImage, setSketchImage] = useState(() => loadJson("rs-free-sketch", ""));
   const [savedSketches, setSavedSketches] = useLocalStorage("rs-saved-sketches", []);
   const [workflowTemplateId, setWorkflowTemplateId] = useState("rollladen-montage");
@@ -640,7 +653,8 @@ export default function App() {
   const roleHome = roleHomeConfig[appRole] || roleHomeConfig.monteur;
   const learningUserId = currentPerson?.id || authUser?.id || "local-azubi";
   const learningUserName = currentPerson?.name || authUser?.name || "";
-  const myReports = appRole === "azubi" ? savedReports.filter((report) => report.userName === learningUserName || report.createdBy === learningUserId || (!report.userName && !report.createdBy)) : savedReports;
+  const canViewLearningTeam = authUser?.role === "dev" || ["meister", "buero"].includes(appRole);
+  const myReports = canViewLearningTeam ? savedReports : savedReports.filter((report) => report.userName === learningUserName || report.createdBy === learningUserId || (!report.userName && !report.createdBy));
   const learnerTrainingYear = Math.max(1, Math.min(4, Number(currentPerson?.trainingYear || reportYear || 1)));
   const currentLearningProgress = learningProgress?.[learningUserId] || {};
   const currentCurriculum = learningModules.filter((module) => module.year <= learnerTrainingYear);
@@ -656,7 +670,6 @@ export default function App() {
     recommended: recommendedLearningModules,
     openReports: myReports.filter((report) => report.status !== "Freigegeben").length,
   };
-  const canViewLearningTeam = authUser?.role === "dev" || ["meister", "buero"].includes(appRole);
   const currentCustomerOrders = appRole === "kunde" ? visibleOrders : visibleOrders.filter((o) => o.customerPersonId || o.customer);
   const currentCustomerDocuments = useMemo(() => {
     const customerOrderIds = new Set(currentCustomerOrders.map((order) => order.id));
@@ -665,7 +678,6 @@ export default function App() {
   const currentOrderHistory = selectedOrder?.statusHistory || [{ status: selectedOrder?.status || "offen", at: selectedOrder?.updatedAt || selectedOrder?.createdAt || "", by: authUser?.name || "System", note: "Aktueller Status" }];
   const selectedWorkflowTemplate = orderWorkflowTemplates.find((t) => t.id === workflowTemplateId) || orderWorkflowTemplates[0];
   const diagnosisCategories = ["all", ...new Set(allDiagnosisTrees.map((d) => d.category))];
-  const filteredDiagnosisTrees = allDiagnosisTrees.filter((d) => (diagnosisCategory === "all" || d.category === diagnosisCategory) && [d.title, d.category, d.start.q, d.start.yes, d.start.no, ...(d.tools || []), ...(d.firstSteps || []), ...(d.productIds || [])].join(" ").toLowerCase().includes(diagnosisQuery.toLowerCase()));
   const filteredMakers = allManufacturers.filter((m) => [m.name, ...(m.categories || []), ...(m.typicalProducts || []), ...(m.motors || []), ...(m.controls || []), ...(m.protocols || []), ...(m.sensors || []), ...(m.smartHome || []), ...(m.partCategories || []), ...(m.topics || []), ...(m.productIds || []), m.note].join(" ").toLowerCase().includes(manufacturerQuery.toLowerCase()));
   const net = Number(calc.count) * Number(calc.material) + Number(calc.labor) * Number(calc.rate) + Number(calc.travel) + Number(calc.wdvs) + Number(calc.disposal);
   const selectedReportTemplate = reportActivityTemplates.find((template) => template.id === reportTemplateId) || reportActivityTemplates[0];
@@ -677,6 +689,7 @@ export default function App() {
   const checkButton = (scope, item) => <button key={item} onClick={() => toggleModuleCheck(scope, item)} className={`flex w-full items-center gap-3 rounded-2xl p-3 text-left text-sm font-bold ${isModuleChecked(scope, item) ? "bg-emerald-50 text-emerald-900" : "bg-white text-slate-700"}`}><MiniCheck done={isModuleChecked(scope, item)} />{item}</button>;
   const markScopeDone = (scope, items = []) => setModuleChecks((current) => ({ ...current, [scope]: Object.fromEntries(items.map((item) => [item, true])) }));
   const updateLearningProgress = (learnerId, moduleId, checkpointId, checked) => {
+    if (learnerId !== learningUserId) return;
     setLearningProgress((current) => ({
       ...(current || {}),
       [learnerId]: {
@@ -690,6 +703,79 @@ export default function App() {
       },
     }));
     addToSyncQueue("Lernfortschritt geändert", { learnerId, moduleId, checkpointId, checked });
+  };
+  const saveQuizAnswer = (learnerId, card, correct) => {
+    if (!card || learnerId !== learningUserId) return;
+    setQuizProgress((current) => recordQuizAnswer(current, learnerId, card, correct));
+    addToSyncQueue("Quizantwort gespeichert", { learnerId, questionId: card.id, correct }, { type: "quizProgress", recordId: `${learnerId}:${card.id}` });
+  };
+  const saveLearningPracticeCase = (practiceCase) => {
+    if (!practiceCase?.id || practiceCase.learnerId !== learningUserId) return;
+    setLearningPracticeCases((current) => [practiceCase, ...(Array.isArray(current) ? current : []).filter((item) => item.id !== practiceCase.id)]);
+    addToSyncQueue("Praxisfall gespeichert", { learnerId: practiceCase.learnerId, recordId: practiceCase.id, status: practiceCase.status }, { type: "practiceCase", recordId: practiceCase.id });
+    showNotice("Praxisfall wurde lokal gespeichert und zur Synchronisierung vorgemerkt.");
+  };
+  const createLearningPracticeCaseFromOrder = (order, learnerId = learningUserId) => {
+    if (!order || learnerId !== learningUserId) return;
+    const productName = productTypes.find((product) => product.id === order.product)?.name || order.product || "Anlage";
+    const practiceCase = createPracticeCaseFromOrder(order, learnerId, productName);
+    saveLearningPracticeCase(practiceCase);
+    if (canOpenModule("learning")) setActive("learning");
+  };
+  const saveDiagnosisAsLearningCase = (session, tree) => {
+    if (!session || !tree || !canOpenModule("learning")) { showNotice("Für diese Rolle ist der Lernbereich nicht freigegeben."); return; }
+    saveLearningPracticeCase(createPracticeCaseFromDiagnosis(session, tree, learningUserId));
+    setActive("learning");
+  };
+  const saveLearningAssignment = (assignment) => {
+    if (!canViewLearningTeam || !assignment?.id) return;
+    setLearningAssignments((current) => [assignment, ...(Array.isArray(current) ? current : []).filter((item) => item.id !== assignment.id)]);
+    addToSyncQueue("Lernaufgabe zugewiesen", { learnerId: assignment.learnerId, recordId: assignment.id }, { type: "learningAssignment", recordId: assignment.id, immediate: true });
+    showNotice("Lernaufgabe wurde zugewiesen.");
+  };
+  const updateLearningAssignment = (assignmentId, status) => {
+    const assignment = learningAssignments.find((item) => item.id === assignmentId);
+    if (!assignment || (!canViewLearningTeam && assignment.learnerId !== learningUserId)) return;
+    setLearningAssignments((current) => current.map((item) => item.id === assignmentId ? { ...item, status, updatedAt: new Date().toISOString() } : item));
+    addToSyncQueue("Lernaufgabe geändert", { learnerId: assignment.learnerId, recordId: assignmentId, status }, { type: "learningAssignment", recordId: assignmentId });
+  };
+  const saveLearningComment = (comment) => {
+    if (!canViewLearningTeam || !comment?.id) return;
+    setLearningComments((current) => [comment, ...(Array.isArray(current) ? current : []).filter((item) => item.id !== comment.id)]);
+    addToSyncQueue("Lernkommentar gespeichert", { learnerId: comment.learnerId, recordId: comment.id }, { type: "learningComment", recordId: comment.id });
+    showNotice("Kommentar wurde gespeichert.");
+  };
+  const updateLearningComment = (commentId, status) => {
+    const comment = learningComments.find((item) => item.id === commentId);
+    if (!comment || (!canViewLearningTeam && comment.learnerId !== learningUserId)) return;
+    setLearningComments((current) => current.map((item) => item.id === commentId ? { ...item, status, updatedAt: new Date().toISOString() } : item));
+    addToSyncQueue("Lernkommentar geändert", { learnerId: comment.learnerId, recordId: commentId, status }, { type: "learningComment", recordId: commentId });
+  };
+  const toggleLearningList = (learnerId, listName, moduleId) => {
+    if (learnerId !== learningUserId || !["favorites", "later"].includes(listName)) return;
+    setLearningLists((current) => {
+      const learner = current?.[learnerId] || { favorites: [], later: [] };
+      const values = learner[listName] || [];
+      return { ...(current || {}), [learnerId]: { ...learner, [listName]: values.includes(moduleId) ? values.filter((id) => id !== moduleId) : [...values, moduleId] } };
+    });
+    addToSyncQueue("Lernliste geändert", { learnerId, moduleId, listName }, { type: "learningProgress", recordId: learnerId });
+  };
+  const prepareLearningReport = (text, practiceCase = null) => {
+    setReportText(text || "");
+    setReportStatus("Entwurf");
+    if (practiceCase?.sourceType === "order" && orders.some((order) => order.id === practiceCase.sourceId)) setSelectedOrderId(practiceCase.sourceId);
+    if (canOpenModule("reportBook")) setActive("reportBook");
+    showNotice("Berichtsheft-Entwurf vorbereitet. Bitte prüfen und in eigenen Worten ergänzen.");
+  };
+  const openLearningReportBook = (draft = "") => {
+    if (draft) setReportText(draft);
+    if (canOpenModule("reportBook")) setActive("reportBook");
+  };
+  const reviewLearningReport = (reportId, status, comment) => {
+    if (!canViewLearningTeam || !["Änderung erforderlich", "Freigegeben"].includes(status)) return;
+    setSavedReports((current) => current.map((report) => report.id === reportId ? { ...report, status, masterComment: comment, reviewedAt: new Date().toISOString(), reviewedBy: authUser?.name || "Ausbildungsleitung" } : report));
+    addToSyncQueue("Berichtsheft geprüft", { reportId, status }, { type: "reportBook", recordId: reportId, immediate: true });
+    showNotice(status === "Freigegeben" ? "Bericht wurde freigegeben." : "Änderung wurde angefordert.");
   };
   const partRequestOrder = orders.find((order) => order.id === partRequest.orderId) || selectedOrder;
   const partPhotoScope = `ersatzteil-anfrage-${partRequest.draftKey || partRequest.id || partRequestOrder?.id || "neu"}`;
@@ -926,13 +1012,43 @@ export default function App() {
     if (snapshot.moduleChecks) setModuleChecks(snapshot.moduleChecks);
     if (Array.isArray(snapshot.partRequests)) setPartRequests(snapshot.partRequests);
     if (snapshot.learningProgress && typeof snapshot.learningProgress === "object") setLearningProgress(snapshot.learningProgress);
+    if (snapshot.quizProgress && typeof snapshot.quizProgress === "object") setQuizProgress(snapshot.quizProgress);
+    if (Array.isArray(snapshot.learningPracticeCases)) setLearningPracticeCases(snapshot.learningPracticeCases);
+    if (Array.isArray(snapshot.learningAssignments)) setLearningAssignments(snapshot.learningAssignments);
+    if (Array.isArray(snapshot.learningComments)) setLearningComments(snapshot.learningComments);
+    if (snapshot.learningLists && typeof snapshot.learningLists === "object") setLearningLists(snapshot.learningLists);
     if (typeof snapshot.sketchImage === "string") setSketchImage(snapshot.sketchImage);
     if (Array.isArray(snapshot.savedSketches)) setSavedSketches(snapshot.savedSketches);
     if (Array.isArray(snapshot.manufacturerFavorites)) setManufacturerFavorites(snapshot.manufacturerFavorites);
     if (Array.isArray(snapshot.motorFavorites)) setMotorFavorites(snapshot.motorFavorites);
     if (Array.isArray(snapshot.technicalRecents)) setTechnicalRecents(snapshot.technicalRecents);
     if (snapshot.technicalNotes && typeof snapshot.technicalNotes === "object") setTechnicalNotes(snapshot.technicalNotes);
+    if (Array.isArray(snapshot.diagnosisFavorites)) setDiagnosisFavorites(snapshot.diagnosisFavorites);
+    if (Array.isArray(snapshot.diagnosisRecents)) setDiagnosisRecents(snapshot.diagnosisRecents);
+    if (Array.isArray(snapshot.diagnosisSessions)) setDiagnosisSessions(snapshot.diagnosisSessions);
     if (snapshot.orders?.[0]?.id) setSelectedOrderId(snapshot.orders[0].id);
+  };
+  const applyPersonalLearningRecord = (personId, data = {}) => {
+    if (!personId || !data || typeof data !== "object") return;
+    const mergeRows = (current, incoming, belongsToPerson) => {
+      const currentRows = Array.isArray(current) ? current : [];
+      const others = currentRows.filter((item) => !belongsToPerson(item));
+      const merged = new Map();
+      for (const item of [...currentRows.filter(belongsToPerson), ...(Array.isArray(incoming) ? incoming : [])]) {
+        const existing = merged.get(item.id);
+        const itemTime = Date.parse(item.updatedAt || item.reviewedAt || item.createdAt || 0) || 0;
+        const existingTime = Date.parse(existing?.updatedAt || existing?.reviewedAt || existing?.createdAt || 0) || 0;
+        if (!existing || itemTime >= existingTime) merged.set(item.id, item);
+      }
+      return [...merged.values(), ...others];
+    };
+    if (data.learningProgress && typeof data.learningProgress === "object") setLearningProgress((current) => ({ ...(current || {}), [personId]: data.learningProgress }));
+    if (data.quizProgress && typeof data.quizProgress === "object") setQuizProgress((current) => ({ ...(current || {}), [personId]: data.quizProgress }));
+    if (data.learningLists && typeof data.learningLists === "object") setLearningLists((current) => ({ ...(current || {}), [personId]: data.learningLists }));
+    if (Array.isArray(data.practiceCases)) setLearningPracticeCases((current) => mergeRows(current, data.practiceCases, (item) => item.learnerId === personId));
+    if (Array.isArray(data.assignments)) setLearningAssignments((current) => mergeRows(current, data.assignments, (item) => item.learnerId === personId));
+    if (Array.isArray(data.comments)) setLearningComments((current) => mergeRows(current, data.comments, (item) => item.learnerId === personId));
+    if (Array.isArray(data.reports)) setSavedReports((current) => mergeRows(current, data.reports, (item) => item.createdBy === personId));
   };
   const saveAppToSupabase = async (overrideCompany = null, options = {}) => {
     if (!requireSupabase()) return false;
@@ -945,7 +1061,13 @@ export default function App() {
       return false;
     }
     const currentQueue = syncQueueRef.current;
-    const syncItems = getSyncableQueueItems(currentQueue, { includeFailed: Boolean(options.force) });
+    const allSyncItems = getSyncableQueueItems(currentQueue, { includeFailed: Boolean(options.force) });
+    const personalLearningRole = ["azubi", "monteur", "vorarbeiter"].includes(authUser?.role);
+    const learningTypes = new Set(["learningProgress", "quizProgress", "practiceCase", "reportBook", "learningAssignment", "learningComment"]);
+    const personalLearningItems = allSyncItems.filter((item) => learningTypes.has(item.type));
+    const syncItems = personalLearningRole
+      ? (personalLearningItems.length ? allSyncItems.filter((item) => learningTypes.has(item.type) || item.type === "snapshot") : [])
+      : allSyncItems;
     const syncItemIds = syncItems.map((item) => item.id);
     if (!syncItemIds.length && !overrideCompany && !options.forceSnapshot) return true;
 
@@ -961,14 +1083,34 @@ export default function App() {
         .map((item) => item.recordId)
         .filter(Boolean);
 
-      await saveCompanySnapshot({
-        client: supabase,
-        companyRow: companyToRow(activeCompany),
-        peopleRows: companyPeople.map((person) => personToRow(person, activeCompany.id)),
-        orderRows: orders.map((order) => ({ id: order.id, company_id: activeCompany.id, data: order, updated_at: timestamp })),
-        deletedOrderIds,
-        snapshotRow: { company_id: activeCompany.id, snapshot, updated_at: timestamp },
-      });
+      if (personalLearningRole) {
+        await saveLearningRecord({
+          client: supabase,
+          learningRow: {
+            company_id: activeCompany.id,
+            person_id: learningUserId,
+            data: {
+              learningProgress: learningProgress?.[learningUserId] || {},
+              quizProgress: quizProgress?.[learningUserId] || {},
+              practiceCases: learningPracticeCases.filter((item) => item.learnerId === learningUserId),
+              assignments: learningAssignments.filter((item) => item.learnerId === learningUserId),
+              comments: learningComments.filter((item) => item.learnerId === learningUserId),
+              learningLists: learningLists?.[learningUserId] || {},
+              reports: savedReports.filter((item) => item.createdBy === learningUserId || (!item.createdBy && item.userName === learningUserName)),
+            },
+            updated_at: timestamp,
+          },
+        });
+      } else {
+        await saveCompanySnapshot({
+          client: supabase,
+          companyRow: companyToRow(activeCompany),
+          peopleRows: companyPeople.map((person) => personToRow(person, activeCompany.id)),
+          orderRows: orders.map((order) => ({ id: order.id, company_id: activeCompany.id, data: order, updated_at: timestamp })),
+          deletedOrderIds,
+          snapshotRow: { company_id: activeCompany.id, snapshot, updated_at: timestamp },
+        });
+      }
       const syncedAt = new Date().toISOString();
       setLastSyncedAt(syncedAt);
       setSyncError("");
@@ -997,10 +1139,12 @@ export default function App() {
     try {
       const isCustomerAccount = targetRole === "kunde";
       const preserveLocalChanges = !isCustomerAccount && getQueueSummary(syncQueueRef.current).unsynced > 0;
-      const { snap, portalData, portalErrorMessage, remotePeople, remoteOrders } = await withTimeout((async () => {
+      const { learningRecord, learningRecordError, snap, portalData, portalErrorMessage, remotePeople, remoteOrders } = await withTimeout((async () => {
         let snap = null;
         let portalData = null;
         let portalErrorMessage = "";
+        let learningRecord = null;
+        let learningRecordError = "";
         if (isCustomerAccount) {
           const { data, error } = await supabase.rpc("get_customer_portal_data", { p_company_id: companyId });
           portalData = data || null;
@@ -1017,8 +1161,16 @@ export default function App() {
           const { data, error: ordersError } = await supabase.from("orders").select("*").eq("company_id", companyId).order("updated_at", { ascending: false });
           if (ordersError) throw ordersError;
           remoteOrders = data || [];
+          if (targetPersonId) {
+            try {
+              const row = await loadLearningRecord({ client: supabase, companyId, personId: targetPersonId });
+              learningRecord = row?.data || null;
+            } catch (error) {
+              learningRecordError = error.message || "Persönlicher Lernstand konnte nicht geladen werden.";
+            }
+          }
         }
-        return { snap, portalData, portalErrorMessage, remotePeople, remoteOrders };
+        return { learningRecord, learningRecordError, snap, portalData, portalErrorMessage, remotePeople, remoteOrders };
       })());
       if (isCustomerAccount) {
         const ownPeople = (remotePeople || []).filter((person) => person.id === targetPersonId);
@@ -1034,9 +1186,11 @@ export default function App() {
         if (snap?.snapshot) applyRemoteSnapshot(snap.snapshot);
         if (remotePeople?.length) setCompanyPeople(remotePeople.map(rowToPerson));
         if (remoteOrders?.length) setOrders(remoteOrders.map((row) => row.data));
+        if (learningRecord && targetPersonId) applyPersonalLearningRecord(targetPersonId, learningRecord);
       } else {
         addSyncLog("Lokale Änderungen vor Cloud-Stand priorisiert");
       }
+      if (learningRecordError) addSyncLog(`Persönlicher Lern-Sync nicht verfügbar: ${learningRecordError}`, "fehler");
       if (!preserveLocalChanges) setLastSyncedAt(new Date().toISOString());
       setSyncError(portalErrorMessage ? "Kundenportal konnte nicht sicher aus der Cloud geladen werden. Supabase-Schema aktualisieren." : "");
       addSyncLog("Supabase geladen");
@@ -1317,7 +1471,7 @@ Kopie/Nachfolgeauftrag aus ${selectedOrder.id}`.trim(), statusHistory: [{ status
   const createOrderFromWorkflowTemplate = () => { const t = selectedWorkflowTemplate; const id = `A-${Math.floor(1000 + Math.random() * 9000)}`; const stamp = new Date().toLocaleString("de-DE"); const order = { id, customer: "Neuer Kunde", contact: "", phone: "", email: "", address: "", date: todayIso(), time: "08:00", assignedTo: "", product: t.product, substrate: "Beton", drive: "Funkmotor", installType: "Renovierung", windCritical: false, status: "Neu", priority: "normal", orderType: t.orderType, notes: t.notes, internalNotes: t.notes, createdAt: stamp, updatedAt: stamp, statusHistory: [{ status: "Neu", at: stamp, by: authUser?.name || "System", note: `Aus Vorlage ${t.name} erstellt` }] }; setOrders((list) => [order, ...list]); setSelectedOrderId(id); setChecks((current) => ({ ...current, [id]: buildEmptyChecklist(order.product, order) })); setActive("orders"); addToSyncQueue("Auftrag aus Vorlage erstellt", { template: t.id, orderId: id }); showNotice(`Vorlage erstellt: ${t.name}`); };
   const toggleCheck = (orderId, item) => { setChecks((current) => ({ ...current, [orderId]: { ...(current[orderId] || {}), [item]: !(current[orderId]?.[item]) } })); addToSyncQueue("Checkliste geändert", { orderId, item }); };
   const setMeasurementField = (field, value) => { setMeasurementValues((current) => ({ ...current, [selectedOrder?.id]: { ...(current[selectedOrder?.id] || {}), [field]: value } })); };
-  const uploadPhoto = (category, file) => { if (!file || !selectedOrder) return; const reader = new FileReader(); reader.onload = () => { const record = { id: `PHOTO-${Date.now()}`, orderId: selectedOrder.id, category, name: file.name, url: String(reader.result || ""), note: "", createdAt: new Date().toLocaleString("de-DE"), required: REQUIRED_ORDER_PHOTOS.includes(category) }; setPhotos((current) => ({ ...current, [selectedOrder.id]: { ...(current[selectedOrder.id] || {}), [category]: record } })); addToSyncQueue("Foto hinzugefügt", { orderId: selectedOrder.id, photoType: category, fileName: file.name }); appendOrderEvent(selectedOrder.id, `${category}-Foto hinzugefügt`); }; reader.onerror = () => showNotice("Foto konnte nicht lokal gelesen werden."); reader.readAsDataURL(file); };
+  const uploadPhoto = (category, file) => { if (!file || !selectedOrder) return; const reader = new FileReader(); reader.onload = () => { const record = { id: `PHOTO-${Date.now()}`, orderId: selectedOrder.id, diagnosisId: pendingPhotoDiagnosis?.orderId === selectedOrder.id ? pendingPhotoDiagnosis.sessionId : "", category, name: file.name, url: String(reader.result || ""), note: pendingPhotoDiagnosis?.orderId === selectedOrder.id ? `Zur Diagnose ${pendingPhotoDiagnosis.title || pendingPhotoDiagnosis.sessionId}` : "", createdAt: new Date().toLocaleString("de-DE"), required: REQUIRED_ORDER_PHOTOS.includes(category) }; setPhotos((current) => ({ ...current, [selectedOrder.id]: { ...(current[selectedOrder.id] || {}), [category]: record } })); addToSyncQueue("Foto hinzugefügt", { orderId: selectedOrder.id, diagnosisId: record.diagnosisId, photoType: category, fileName: file.name }); appendOrderEvent(selectedOrder.id, `${category}-Foto hinzugefügt${record.diagnosisId ? ` · Diagnose ${record.diagnosisId}` : ""}`); }; reader.onerror = () => showNotice("Foto konnte nicht lokal gelesen werden."); reader.readAsDataURL(file); };
   const updatePhotoNote = (category, note) => { if (!selectedOrder) return; setPhotos((current) => ({ ...current, [selectedOrder.id]: { ...(current[selectedOrder.id] || {}), [category]: { ...(current[selectedOrder.id]?.[category] || {}), note } } })); };
   const toggleQuality = (id) => { if (!selectedOrder) return; setManualQuality((current) => ({ ...current, [selectedOrder.id]: { ...(current[selectedOrder.id] || {}), [id]: !current[selectedOrder.id]?.[id] } })); addToSyncQueue("Abschlussprüfung geändert", { orderId: selectedOrder.id, id }); };
   const setQualityValue = (id, value) => { if (!selectedOrder) return; setManualQuality((current) => ({ ...current, [selectedOrder.id]: { ...(current[selectedOrder.id] || {}), [id]: value } })); addToSyncQueue("Abschlussentscheidung geändert", { orderId: selectedOrder.id, id, value }); };
@@ -1325,14 +1479,58 @@ Kopie/Nachfolgeauftrag aus ${selectedOrder.id}`.trim(), statusHistory: [{ status
   const applyReportTemplate = () => { setReportText(selectedReportTemplate.text); showNotice("Vorlage wurde übernommen."); };
   const importChecklistIntoReport = () => { const text = reportCheckedItems.length ? `Erledigte Checklistenpunkte: ${reportCheckedItems.join(", ")}.` : `Beim Auftrag ${selectedOrder?.id || ""} wurden noch keine Checklistenpunkte abgehakt.`; setReportText((current) => `${current}\n${text}`.trim()); showNotice("Checkliste wurde übernommen."); };
   const addPhotoNoteToReport = () => { const photoNames = Object.keys(orderPhotos); const text = photoNames.length ? `Fotodokumentation erstellt: ${photoNames.join(", ")}.` : "Fotodokumentation wurde vorbereitet, aber noch keine Fotos hinzugefügt."; setReportText((current) => `${current}\n${text}`.trim()); showNotice("Foto-Notiz eingefügt."); };
-  const saveReportEntry = () => { const entry = { id: Date.now(), mode: reportMode, status: reportStatus, text: reportProposal, orderId: selectedOrder?.id || "", createdAt: new Date().toLocaleString("de-DE"), createdBy: currentPerson?.id || authUser?.id || "", userName: currentPerson?.name || authUser?.name || "", masterComment: reportMasterComment }; setSavedReports((entries) => [entry, ...entries]); addToSyncQueue("Berichtsheft gespeichert", { reportId: entry.id, orderId: entry.orderId, status: entry.status }); showNotice("Berichtsheft-Eintrag gespeichert."); };
+  const saveReportEntry = () => { const allowedOwnStatuses = ["Entwurf", "Fertig", "Zur Prüfung"]; const safeStatus = canViewLearningTeam || allowedOwnStatuses.includes(reportStatus) ? reportStatus : "Zur Prüfung"; const entry = { id: Date.now(), mode: reportMode, status: safeStatus, text: reportProposal, orderId: selectedOrder?.id || "", createdAt: new Date().toLocaleString("de-DE"), createdBy: currentPerson?.id || authUser?.id || "", userName: currentPerson?.name || authUser?.name || "", masterComment: canViewLearningTeam ? reportMasterComment : "" }; setSavedReports((entries) => [entry, ...entries]); addToSyncQueue("Berichtsheft gespeichert", { reportId: entry.id, orderId: entry.orderId, status: entry.status }); showNotice("Berichtsheft-Eintrag gespeichert."); };
   const generateWeeklyReport = () => { const weekOrders = orders.slice(0, 5); const text = `Wochenbericht automatisch erstellt. Berücksichtigte Aufträge: ${weekOrders.map((order) => `${order.id} ${productTypes.find((p) => p.id === order.product)?.name || "Produkt"} bei ${order.customer}`).join("; ")}. Schwerpunkte waren Aufmaß, Montagevorbereitung, Checklistenbearbeitung, Funktionsprüfung, Dokumentation und Kundenkommunikation.`; setReportMode("Wochenbericht"); setReportText(text); showNotice("Wochenbericht erzeugt."); };
   const exportCurrentReport = () => { const text = `BERICHTSHEFT-EXPORT\nDatum: ${new Date().toLocaleString("de-DE")}\nStatus: ${reportStatus}\nAuftrag: ${selectedOrder?.id || ""}\n\n${reportProposal}\n\nMeister-Kommentar:\n${reportMasterComment || "-"}`; setReportExportText(text); setBackupText(text); showNotice("Export erzeugt."); };
-  const approveLatestReport = () => { if (!savedReports[0]) { showNotice("Es gibt noch keinen gespeicherten Bericht."); return; } const reportId = savedReports[0].id; setSavedReports((entries) => entries.map((entry, index) => index === 0 ? { ...entry, status: "Freigegeben", masterComment: reportMasterComment || entry.masterComment || "Freigegeben." } : entry)); setReportStatus("Freigegeben"); addToSyncQueue("Berichtsheft freigegeben", { reportId, status: "Freigegeben" }); showNotice("Letzter Bericht freigegeben."); };
-  const deleteReport = (id) => { setSavedReports((entries) => entries.filter((entry) => entry.id !== id)); addToSyncQueue("Berichtsheft gelöscht", { reportId: id }); showNotice("Bericht gelöscht."); };
+  const approveLatestReport = () => { if (!canViewLearningTeam) { showNotice("Nur Ausbildungsleitung, Büro oder Dev dürfen Berichte freigeben."); return; } if (!savedReports[0]) { showNotice("Es gibt noch keinen gespeicherten Bericht."); return; } const reportId = savedReports[0].id; setSavedReports((entries) => entries.map((entry, index) => index === 0 ? { ...entry, status: "Freigegeben", masterComment: reportMasterComment || entry.masterComment || "Freigegeben." } : entry)); setReportStatus("Freigegeben"); addToSyncQueue("Berichtsheft freigegeben", { reportId, status: "Freigegeben" }); showNotice("Letzter Bericht freigegeben."); };
+  const deleteReport = (id) => { const report = savedReports.find((entry) => entry.id === id); if (!report || (!canViewLearningTeam && report.createdBy && report.createdBy !== learningUserId)) return; setSavedReports((entries) => entries.filter((entry) => entry.id !== id)); addToSyncQueue("Berichtsheft gelöscht", { reportId: id }); showNotice("Bericht gelöscht."); };
   const addNote = () => { if (!favorite.trim()) return; setNotes((n) => [{ id: Date.now(), text: favorite, module: active }, ...n]); setFavorite(""); };
   const runPhotoAnalysis = (label) => { const photo = orderPhotos[label]; const analysis = photo ? `${label}: Foto '${photo.name}' wurde Auftrag ${selectedOrder?.id || "ohne Auftrag"} zugeordnet. Vorschlag: im Protokoll verwenden und beim Abschluss prüfen.` : `${label}: Noch kein Foto vorhanden.`; if (selectedOrder) setPhotoAnalyses((current) => ({ ...current, [selectedOrder.id]: { ...(current[selectedOrder.id] || {}), [label]: analysis } })); };
   const saveDiagnosisToOrder = (draft) => { if (!selectedOrder) return; const entry = { id: `DIA-${Date.now()}`, ...draft, product: selectedOrder.product, manufacturer: selectedOrder.manufacturer || "", drive: selectedOrder.drive || "", substrate: selectedOrder.substrate || "", createdAt: new Date().toLocaleString("de-DE"), createdBy: authUser?.name || "System" }; setOrders((list) => list.map((order) => order.id === selectedOrder.id ? { ...order, diagnoses: [entry, ...(order.diagnoses || [])], updatedAt: entry.createdAt, statusHistory: [...(order.statusHistory || []), { status: order.status, at: entry.createdAt, by: entry.createdBy, note: `Diagnose gespeichert: ${entry.issue || entry.result || "Ergebnis"}` }] } : order)); addToSyncQueue("Diagnose zum Auftrag gespeichert", { orderId: selectedOrder.id, recordId: entry.id }); showNotice("Diagnose wurde in der Auftragsakte gespeichert."); };
+  const persistDiagnosisSession = (session, options = {}) => {
+    if (!session?.id) return;
+    setDiagnosisSessions((current) => [session, ...(Array.isArray(current) ? current : []).filter((item) => item.id !== session.id)].slice(0, 50));
+    if (options.queue) addToSyncQueue("Diagnose-Zwischenstand gespeichert", { recordId: session.id, orderId: session.context?.orderId || "", status: session.status }, { type: "diagnosis", recordId: session.id });
+    if (options.notify) showNotice("Diagnose wurde lokal gespeichert und für die Synchronisierung vorgemerkt.");
+  };
+  const recordDiagnosisRecent = (treeId) => setDiagnosisRecents((current) => [treeId, ...(Array.isArray(current) ? current : []).filter((id) => id !== treeId)].slice(0, 8));
+  const saveGuidedDiagnosisToOrder = (session, tree) => {
+    const orderId = session?.context?.orderId || selectedOrder?.id;
+    if (!orderId || !tree) { showNotice("Bitte zuerst einen Auftrag auswählen."); return; }
+    const order = orders.find((item) => item.id === orderId);
+    if (!order) { showNotice("Der zugeordnete Auftrag wurde nicht gefunden."); return; }
+    const normalizedSession = { ...session, status: "completed", result: { ...session.result, orderStatus: session.orderStatus || session.result?.orderStatus || "offen" }, updatedAt: new Date().toISOString() };
+    const entry = { ...formatDiagnosisForOrder(normalizedSession, tree, currentPerson?.name || authUser?.name || "System"), product: order.product, manufacturer: order.manufacturer || "", drive: order.drive || "", substrate: order.substrate || "" };
+    setOrders((list) => list.map((item) => item.id === orderId ? { ...item, diagnoses: [entry, ...(item.diagnoses || []).filter((diagnosis) => diagnosis.id !== entry.id)], updatedAt: entry.updatedAt, statusHistory: [...(item.statusHistory || []), { status: item.status, at: entry.updatedAt, by: entry.createdBy, note: `Geführte Diagnose gespeichert: ${entry.issue} · ${entry.status}` }] } : item));
+    persistDiagnosisSession(normalizedSession, { queue: false });
+    addToSyncQueue("Geführte Diagnose zum Auftrag gespeichert", { orderId, recordId: entry.id, status: entry.status }, { type: "diagnosis", recordId: entry.id, immediate: true });
+    showNotice(`Diagnose wurde Auftrag ${orderId} zugeordnet.`);
+  };
+  const openDiagnosisPhoto = (category = "Schaden", session = null) => { const orderId = session?.context?.orderId || selectedOrder?.id || ""; if (orderId) setSelectedOrderId(orderId); setPendingPhotoDiagnosis(session ? { sessionId: session.id, orderId, title: session.title } : null); setActive("photos"); showNotice(`Foto-Kategorie „${category}“ geöffnet. Das Foto wird Auftrag und Diagnose zugeordnet.`); };
+  const openDiagnosisManufacturer = (tree) => { setManufacturerQuery(selectedOrder?.manufacturer || tree?.category || ""); setActive("manufacturers"); };
+  const openDiagnosisLearning = (tree) => {
+    if (!canOpenModule("learning")) { showNotice("Für diese Rolle ist der Lernbereich nicht freigegeben."); return; }
+    setActive("learning");
+    showNotice(`Passendes Lernthema: ${tree?.learningTargets?.[0] || tree?.category || "Diagnose"}.`);
+  };
+  const openDiagnosisKnowledge = (tree) => { setTechnicalQuery(tree?.title || tree?.category || ""); setActive("products"); };
+  const openDiagnosisMotors = (session, tree) => {
+    const drive = String(session?.context?.drive || selectedOrder?.drive || "").toLowerCase();
+    const candidates = allMotorTypes.filter((motor) => (motor.diagnosisIds || []).includes(tree?.id) || (motor.productIds || []).includes(session?.context?.productId || selectedOrder?.product));
+    const selectedMotor = candidates.find((motor) => drive.includes("funk") && motor.id === "funkmotor") || candidates[0] || allMotorTypes[0];
+    setMotorQuery(selectedMotor?.name || session?.context?.drive || tree?.title || "");
+    if (selectedMotor && session?.context?.orderId) {
+      const scope = `motor-check-auftrag-${session.context.orderId}-${selectedMotor.id}`;
+      const transferred = {};
+      if (session.context.productId) transferred["Produkt identifiziert"] = true;
+      if (session.context.manufacturer) transferred["Hersteller identifiziert"] = true;
+      if (session.context.drive) transferred["Motortyp identifiziert"] = true;
+      if (session.answers?.supply?.value === "Ja, durch Fachkraft") transferred["Spannungsversorgung fachgerecht geprüft"] = true;
+      if (session.answers?.operation?.value && !["Nicht geprüft", "Nicht zutreffend"].includes(session.answers.operation.value)) transferred["Bedienung geprüft"] = true;
+      setModuleChecks((current) => ({ ...current, [scope]: { ...(current[scope] || {}), ...transferred } }));
+    }
+    setActive("motors");
+  };
   const generateKiAnswer = () => { const warnings = []; if (selectedOrder?.substrate === "WDVS") warnings.push("WDVS-Abstandsmontage und Abdichtung prüfen"); if (selectedOrder?.drive?.includes("Funk")) warnings.push("Senderkanal, Reichweite und Gruppensteuerung testen"); if (selectedOrder?.windCritical) warnings.push("Windklasse, Sensorik und Kundenhinweis dokumentieren"); setGeneratedAiResponse(`Prüfvorschlag für ${selectedOrder?.id || "aktuellen Auftrag"}: Produkt ${selectedProduct.name}, Untergrund ${selectedOrder?.substrate || "unbekannt"}, Antrieb ${selectedOrder?.drive || "unbekannt"}. Nächste Schritte: Aufmaß prüfen, Checkliste öffnen, Fotos ergänzen, ${warnings.length ? warnings.join("; ") : "Standardprüfung durchführen"}, Abschlussprüfung öffnen.`); };
   const recordTechnicalUse = (entry) => {
     if (!entry?.id || !entry?.label) return;
@@ -1358,8 +1556,9 @@ Kopie/Nachfolgeauftrag aus ${selectedOrder.id}`.trim(), statusHistory: [{ status
     setPartMode("search");
     setActive("parts");
   };
-  const createPartRequestFromDiagnosis = (diagnosis) => {
-    setPartRequest({ ...createEmptyPartRequest(selectedOrder), part: diagnosis?.partCategories?.[0] || "", requestedPart: diagnosis?.partCategories?.[0] || "", diagnosisId: diagnosis?.id || "", errorDescription: `Diagnose: ${diagnosis?.title || "Fehlerbild"}. ${diagnosis?.start?.q || ""}`.trim(), manufacturer: selectedOrder?.manufacturer || "", motor: selectedOrder?.drive || "" });
+  const createPartRequestFromDiagnosis = (diagnosis, session = null) => {
+    const diagnosisResult = session?.result;
+    setPartRequest({ ...createEmptyPartRequest(selectedOrder), part: diagnosis?.partCategories?.[0] || "", requestedPart: diagnosis?.partCategories?.[0] || "", diagnosisId: session?.id || diagnosis?.id || "", errorDescription: [`Diagnose: ${diagnosis?.title || "Fehlerbild"}.`, diagnosisResult?.probableCause ? `Wahrscheinlicher Bereich: ${diagnosisResult.probableCause}.` : diagnosis?.start?.q, diagnosisResult?.recommendation ? `Empfehlung: ${diagnosisResult.recommendation}` : ""].filter(Boolean).join(" ").trim(), manufacturer: selectedOrder?.manufacturer || session?.context?.manufacturer || "", motor: selectedOrder?.drive || session?.context?.drive || "" });
     setPartMode("request");
     setActive("parts");
     if (diagnosis?.id) recordTechnicalUse({ type: "Diagnose", id: diagnosis.id, label: diagnosis.title, route: "diagnose" });
@@ -1387,7 +1586,7 @@ Kopie/Nachfolgeauftrag aus ${selectedOrder.id}`.trim(), statusHistory: [{ status
     addToSyncQueue("Auftrag wartet auf Material", { orderId, status: "Wartet auf Material" }, { immediate: true });
     showNotice("Auftrag wurde auf „Wartet auf Material“ gesetzt.");
   };
-  const createSnapshot = () => ({ version: "2.1-technical-workspace", exportedAt: new Date().toISOString(), authUser, company, companyPeople, orders, checks, notes, savedReports, measurementValues, manualQuality, photos, photoAnalyses, pdfDocuments, moduleChecks, partRequests, learningProgress, sketchImage, savedSketches, manufacturerFavorites, motorFavorites, technicalRecents, technicalNotes });
+  const createSnapshot = () => ({ version: "2.3-learning-system", exportedAt: new Date().toISOString(), authUser, company, companyPeople, orders, checks, notes, savedReports, measurementValues, manualQuality, photos, photoAnalyses, pdfDocuments, moduleChecks, partRequests, learningProgress, quizProgress, learningPracticeCases, learningAssignments, learningComments, learningLists, sketchImage, savedSketches, manufacturerFavorites, motorFavorites, technicalRecents, technicalNotes, diagnosisFavorites, diagnosisRecents, diagnosisSessions });
     const pushToCloud = () => { const snapshot = createSnapshot(); saveJson(`rs-cloud-${cloudCompanyId}`, snapshot); setBackupText(JSON.stringify(snapshot, null, 2)); addSyncLog("Daten im lokalen Cloud-Snapshot gespeichert"); };
   const pullFromCloud = () => { const snapshot = loadJson(`rs-cloud-${cloudCompanyId}`, null); if (!snapshot) { addSyncLog("Kein lokaler Cloud-Snapshot gefunden", "fehlt"); return; } applyRemoteSnapshot(snapshot); updateSyncQueue(() => restoreSyncQueue(snapshot.syncQueue || [])); addSyncLog("Daten aus lokalem Cloud-Snapshot geladen"); };
   const exportBackup = () => { const text = JSON.stringify(createSnapshot(), null, 2); setBackupText(text); addSyncLog("Backup erzeugt"); };
@@ -1444,7 +1643,7 @@ Kopie/Nachfolgeauftrag aus ${selectedOrder.id}`.trim(), statusHistory: [{ status
   }, [authUser?.id, authUser?.companyId, offline]);
 
   const syncOwnerKey = authUser ? `${authUser.id}:${authUser.companyId || company.id}` : "";
-  const syncChangeToken = useMemo(() => ({}), [company, companyPeople, orders, checks, notes, savedReports, measurementValues, manualQuality, photos, photoAnalyses, pdfDocuments, moduleChecks, partRequests, learningProgress, sketchImage, savedSketches, manufacturerFavorites, motorFavorites, technicalRecents, technicalNotes]);
+  const syncChangeToken = useMemo(() => ({}), [company, companyPeople, orders, checks, notes, savedReports, measurementValues, manualQuality, photos, photoAnalyses, pdfDocuments, moduleChecks, partRequests, learningProgress, quizProgress, learningPracticeCases, learningAssignments, learningComments, learningLists, sketchImage, savedSketches, manufacturerFavorites, motorFavorites, technicalRecents, technicalNotes, diagnosisFavorites, diagnosisRecents, diagnosisSessions]);
   useAutoSync({
     ownerKey: syncOwnerKey,
     ready: initialCloudLoaded,
@@ -1459,6 +1658,33 @@ Kopie/Nachfolgeauftrag aus ${selectedOrder.id}`.trim(), statusHistory: [{ status
 
   const canManageOrders = ["dev", "meister", "buero"].includes(appRole);
   const canEditOrderWork = ["dev", "meister", "buero", "vorarbeiter", "monteur", "azubi"].includes(appRole);
+  const diagnosisPageProps = {
+    checkButton,
+    diagnosisCategories,
+    diagnosisCategory,
+    diagnosisFavorites,
+    diagnosisQuery,
+    diagnosisRecents,
+    diagnosisSessions,
+    moduleChecks,
+    onCreatePartRequest: createPartRequestFromDiagnosis,
+    onOpenKnowledge: openDiagnosisKnowledge,
+    onOpenLearning: openDiagnosisLearning,
+    onOpenManufacturer: openDiagnosisManufacturer,
+    onOpenMotors: openDiagnosisMotors,
+    onOpenParts: openTechnicalParts,
+    onOpenPhoto: openDiagnosisPhoto,
+    onPersistSession: persistDiagnosisSession,
+    onRecordRecent: recordDiagnosisRecent,
+    onSaveLearningCase: saveDiagnosisAsLearningCase,
+    onSaveSessionToOrder: saveGuidedDiagnosisToOrder,
+    onToggleFavorite: (id) => toggleTechnicalFavorite(setDiagnosisFavorites, id),
+    onUse: recordTechnicalUse,
+    selectedOrder,
+    selectedProduct,
+    setDiagnosisCategory,
+    setDiagnosisQuery,
+  };
   const orderDetailProps = selectedOrder ? {
     order: selectedOrder,
     product: selectedProduct,
@@ -1491,10 +1717,11 @@ Kopie/Nachfolgeauftrag aus ${selectedOrder.id}`.trim(), statusHistory: [{ status
       analyzePhoto: runPhotoAnalysis,
       startPartRequest: startPartRequestForSelectedOrder,
       saveDiagnosis: saveDiagnosisToOrder,
+      createLearningCase: () => createLearningPracticeCaseFromOrder(selectedOrder, learningUserId),
     },
     panels: {
       sketches: <SketchesPage checkButton={checkButton} deleteSketch={deleteSketchRecord} orders={visibleOrders} saveSketch={saveSketchRecord} savedSketches={(Array.isArray(savedSketches) ? savedSketches : []).filter((sketch) => !sketch.orderId || sketch.orderId === selectedOrder.id)} selectedOrderId={selectedOrder.id} setSketchImage={setSketchImage} showNotice={showNotice} sketchImage={sketchImage} />,
-      diagnosis: <DiagnosisPage checkButton={checkButton} diagnosisCategories={diagnosisCategories} diagnosisCategory={diagnosisCategory} diagnosisQuery={diagnosisQuery} filteredDiagnosisTrees={filteredDiagnosisTrees} moduleChecks={moduleChecks} onCreatePartRequest={createPartRequestFromDiagnosis} onOpenParts={openTechnicalParts} onUse={recordTechnicalUse} selectedOrder={selectedOrder} selectedProduct={selectedProduct} setDiagnosisCategory={setDiagnosisCategory} setDiagnosisQuery={setDiagnosisQuery} />,
+      diagnosis: <DiagnosisPage {...diagnosisPageProps} />,
       parts: <PartsPage checkButton={checkButton} loadPartRequestDraft={loadPartRequestDraft} mode={partMode} moduleChecks={moduleChecks} newPartRequestDraft={newPartRequestDraft} notes={technicalNotes} onAnalyzeNameplate={openNameplateAssistant} onNoteChange={updateTechnicalNote} onSetOrderWaitingMaterial={setOrderWaitingForMaterial} onUse={recordTechnicalUse} orders={visibleOrders} partPhotoRequirements={partPhotoRequirements} partPhotoScope={partPhotoScope} partQuery={partQuery} partRequest={partRequest} partRequests={orderPartRequests} partRequestText={partRequestText} savePartRequestDraft={savePartRequestDraft} selectedOrder={selectedOrder} setMode={setPartMode} setPartQuery={setPartQuery} setPartRequest={setPartRequest} updatePartRequestStatus={updatePartRequestStatus} />,
       completion: (openArea) => <CloseOrderPage closeReady={closeReady} closingGroups={closingGroups} closingValues={closingValues} completionNote={selectedOrder.completionNote || ""} completeSelectedOrder={completeSelectedOrder} createReworkOrder={() => createReworkOrder({ keepSourceSelected: true })} missingClosingItems={unresolvedQuality} openArea={openArea} selectedChecklistProgress={selectedChecklistProgress} selectedOrder={selectedOrder} selectedProduct={selectedProduct} setQualityValue={setQualityValue} startPartRequest={() => startPartRequestForSelectedOrder(false)} toggleQuality={toggleQuality} updateCompletionNote={(value) => updateSelectedOrder({ completionNote: value })} />,
     },
@@ -1553,7 +1780,7 @@ Kopie/Nachfolgeauftrag aus ${selectedOrder.id}`.trim(), statusHistory: [{ status
     {active === "substrates" && screen(<SubstratesPage checkButton={checkButton} moduleChecks={moduleChecks} selectedOrder={selectedOrder} selectedProduct={selectedProduct} />)}
     {active === "technical" && screen(<TechnicalSearchPage manufacturerFavorites={manufacturerFavorites} onOpenResult={openTechnicalResult} query={technicalQuery} recents={technicalRecents} setQuery={setTechnicalQuery} />)}
     {active === "motors" && screen(<MotorsPage checkButton={checkButton} favorites={motorFavorites} moduleChecks={moduleChecks} motorQuery={motorQuery} notes={technicalNotes} onAnalyzeNameplate={openNameplateAssistant} onNoteChange={updateTechnicalNote} onOpenDiagnosis={openTechnicalDiagnosis} onOpenParts={openTechnicalParts} onToggleFavorite={(id) => toggleTechnicalFavorite(setMotorFavorites, id)} onUse={recordTechnicalUse} selectedOrder={selectedOrder} selectedProduct={selectedProduct} setMotorQuery={setMotorQuery} />)}
-    {active === "diagnose" && screen(<DiagnosisPage checkButton={checkButton} diagnosisCategories={diagnosisCategories} diagnosisCategory={diagnosisCategory} diagnosisQuery={diagnosisQuery} filteredDiagnosisTrees={filteredDiagnosisTrees} moduleChecks={moduleChecks} onCreatePartRequest={createPartRequestFromDiagnosis} onOpenParts={openTechnicalParts} onUse={recordTechnicalUse} selectedOrder={selectedOrder} selectedProduct={selectedProduct} setDiagnosisCategory={setDiagnosisCategory} setDiagnosisQuery={setDiagnosisQuery} />)}
+    {active === "diagnose" && screen(<DiagnosisPage {...diagnosisPageProps} />)}
     {active === "manufacturers" && screen(<ManufacturersPage checkButton={checkButton} favorites={manufacturerFavorites} filteredMakers={filteredMakers} manufacturerQuery={manufacturerQuery} moduleChecks={moduleChecks} notes={technicalNotes} onAnalyzeNameplate={openNameplateAssistant} onNoteChange={updateTechnicalNote} onOpenDiagnosis={openTechnicalDiagnosis} onOpenMotors={(maker) => { setMotorQuery(maker.name); setActive("motors"); }} onOpenParts={openTechnicalParts} onToggleFavorite={(id) => toggleTechnicalFavorite(setManufacturerFavorites, id)} onUse={recordTechnicalUse} selectedOrder={selectedOrder} selectedProduct={selectedProduct} setManufacturerQuery={setManufacturerQuery} />)}
   {active === "measurement" && screen(<OrderMeasurement canEdit={canEditOrderWork} fields={measurementFields} missing={missingMeasurements} onChange={setMeasurementField} order={selectedOrder} product={selectedProduct} values={orderMeasurements} />)}
   {active === "offers" && screen(<div className="grid gap-5 lg:grid-cols-[1fr_0.7fr]"><Card><SectionTitle icon={Euro} title="Angebotsassistent" subtitle="Grobe Kalkulation mit Material, Lohn, Anfahrt, WDVS-Zuschlag und Entsorgung." /><div className="grid gap-4 md:grid-cols-2">{Object.entries(calc).map(([k, v]) => <Field key={k} label={k} type="number" value={v} onChange={(value) => setCalc({ ...calc, [k]: value })} />)}</div></Card><Card><SectionTitle icon={Calculator} title="Preisvorschau" subtitle="Grobe Struktur für ein Angebots-PDF." /><div className="space-y-3"><div className="flex justify-between rounded-2xl bg-slate-50 p-4"><span>Netto</span><strong>{net.toFixed(2)} €</strong></div><div className="flex justify-between rounded-2xl bg-slate-50 p-4"><span>MwSt. 19%</span><strong>{(net * 0.19).toFixed(2)} €</strong></div><div className="flex justify-between rounded-2xl bg-slate-950 p-4 text-white"><span>Brutto</span><strong>{(net * 1.19).toFixed(2)} €</strong></div></div><CopyBox title="Angebotstext kopieren" text={`Wir bieten Ihnen die Lieferung und Montage von ${selectedProduct.name} gemäß Aufmaß und technischer Klärung an. Untergrund, Stromanschluss und Herstellerangaben sind vor Ausführung zu prüfen.`} /></Card></div>)}
@@ -1561,9 +1788,9 @@ Kopie/Nachfolgeauftrag aus ${selectedOrder.id}`.trim(), statusHistory: [{ status
     {active === "parts" && screen(<PartsPage checkButton={checkButton} loadPartRequestDraft={loadPartRequestDraft} mode={partMode} moduleChecks={moduleChecks} newPartRequestDraft={newPartRequestDraft} notes={technicalNotes} onAnalyzeNameplate={openNameplateAssistant} onNoteChange={updateTechnicalNote} onSetOrderWaitingMaterial={setOrderWaitingForMaterial} onUse={recordTechnicalUse} orders={visibleOrders} partPhotoRequirements={partPhotoRequirements} partPhotoScope={partPhotoScope} partQuery={partQuery} partRequest={partRequest} partRequests={partRequests} partRequestText={partRequestText} savePartRequestDraft={savePartRequestDraft} selectedOrder={selectedOrder} setMode={setPartMode} setPartQuery={setPartQuery} setPartRequest={setPartRequest} updatePartRequestStatus={updatePartRequestStatus} />)}
   {active === "customers" && screen(<Card><SectionTitle icon={MessageSquareText} title="Kundenkommunikation mit Auftragsdaten" subtitle="Texte mit Platzhaltern werden aus dem aktiven Auftrag gefüllt." /><div className="mb-5 rounded-3xl bg-slate-50 p-4 text-sm leading-6"><strong>Aktiver Auftrag:</strong> {selectedOrder?.customer} · {selectedProduct.name} · {selectedOrder?.date} {selectedOrder?.time}</div><div className="grid gap-4 md:grid-cols-2">{customerTemplates.map((t) => <CopyBox key={t.title} title={t.title} text={customerTemplateForOrder(t.text)} />)}</div></Card>)}
     {active === "maintenance" && screen(<MaintenancePage checkButton={checkButton} moduleChecks={moduleChecks} selectedOrder={selectedOrder} selectedProduct={selectedProduct} />)}
-    {(active === "learning" || active === "quiz") && screen(<LearningPage appRole={appRole} canViewTeam={canViewLearningTeam} companyPeople={companyPeople} currentLearnerId={learningUserId} currentPerson={currentPerson} initialView={active === "quiz" ? "quiz" : "learning"} learningProgress={learningProgress} myReports={myReports} updateLearningProgress={updateLearningProgress} />)}
+    {(active === "learning" || active === "quiz" || active === "azubiPlan") && screen(<LearningPage appRole={appRole} canViewTeam={canViewLearningTeam} companyPeople={companyPeople} currentLearnerId={learningUserId} currentPerson={currentPerson} initialView={active === "quiz" ? "quiz" : active === "azubiPlan" ? "progress" : "overview"} learningAssignments={learningAssignments} learningComments={learningComments} learningLists={learningLists} learningProgress={learningProgress} myReports={myReports} onCreatePracticeCaseFromOrder={createLearningPracticeCaseFromOrder} onOpenRelated={(target) => navigateTo(target === "diagnosis" ? "diagnose" : target)} onOpenReportBook={openLearningReportBook} onPrepareLearningReport={prepareLearningReport} onQuizAnswer={saveQuizAnswer} onReviewLearningReport={reviewLearningReport} onSaveLearningAssignment={saveLearningAssignment} onSaveLearningComment={saveLearningComment} onSavePracticeCase={saveLearningPracticeCase} onToggleLearningList={toggleLearningList} onUpdateLearningAssignment={updateLearningAssignment} onUpdateLearningComment={updateLearningComment} orders={visibleOrders} practiceCases={learningPracticeCases} quizProgress={quizProgress} updateLearningProgress={updateLearningProgress} />)}
     {active === "knowledge" && screen(<SketchesPage checkButton={checkButton} deleteSketch={deleteSketchRecord} orders={visibleOrders} saveSketch={saveSketchRecord} savedSketches={Array.isArray(savedSketches) ? savedSketches : []} selectedOrderId={selectedOrder?.id || selectedOrderId} setSketchImage={setSketchImage} showNotice={showNotice} sketchImage={sketchImage} />)}
-  {active === "reportBook" && screen(<div className="space-y-5"><Card><SectionTitle icon={BookOpen} title="Berichtsheft-Funktionen" subtitle="Tages-/Wochenbericht, Vorlage, Checklistenübernahme, Foto-Notiz, Status/Freigabe, Erinnerung, Speichern und Export." /><div className="grid gap-5 xl:grid-cols-[0.9fr_1.1fr]"><div className="space-y-4"><div className="grid gap-3 md:grid-cols-2"><label className="block rounded-2xl bg-slate-50 p-4 text-sm font-bold">Berichtsart<select value={reportMode} onChange={(e) => setReportMode(e.target.value)} className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-3"><option>Tagesbericht</option><option>Wochenbericht</option></select></label><label className="block rounded-2xl bg-slate-50 p-4 text-sm font-bold">Ausbildungsjahr<select value={reportYear} onChange={(e) => setReportYear(e.target.value)} className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-3"><option value="1">1. Ausbildungsjahr</option><option value="2">2. Ausbildungsjahr</option><option value="3">3. Ausbildungsjahr</option></select></label><label className="block rounded-2xl bg-slate-50 p-4 text-sm font-bold">Lernfeld<select value={reportLearningField} onChange={(e) => setReportLearningField(e.target.value)} className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-3">{reportLearningFields.map((field) => <option key={field}>{field}</option>)}</select></label><label className="block rounded-2xl bg-slate-50 p-4 text-sm font-bold">Tätigkeits-Vorlage<select value={reportTemplateId} onChange={(e) => setReportTemplateId(e.target.value)} className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-3">{reportActivityTemplates.map((template) => <option key={template.id} value={template.id}>{template.label}</option>)}</select></label></div><div className="grid gap-3 md:grid-cols-3"><button onClick={applyReportTemplate} className="rounded-2xl bg-slate-950 px-4 py-3 text-sm font-bold text-white">Vorlage übernehmen</button><button onClick={importChecklistIntoReport} className="rounded-2xl bg-emerald-100 px-4 py-3 text-sm font-bold text-emerald-800">Checkliste übernehmen</button><button onClick={addPhotoNoteToReport} className="rounded-2xl bg-sky-100 px-4 py-3 text-sm font-bold text-sky-800">Foto-Notiz einfügen</button><button onClick={generateWeeklyReport} className="rounded-2xl bg-violet-100 px-4 py-3 text-sm font-bold text-violet-800">Wochenbericht erzeugen</button><button onClick={approveLatestReport} className="rounded-2xl bg-emerald-100 px-4 py-3 text-sm font-bold text-emerald-800">Letzten Bericht freigeben</button><button onClick={exportCurrentReport} className="rounded-2xl bg-slate-100 px-4 py-3 text-sm font-bold text-slate-800">Bericht exportieren</button></div><TextArea label="Stichpunkte / eigener Text" value={reportText} onChange={setReportText} /><div className="rounded-3xl bg-slate-50 p-4"><p className="text-xs font-bold uppercase text-slate-500">Fachbegriffe</p><div className="mt-3 flex flex-wrap gap-2">{reportTerms.map((term) => <Badge key={term}>{term}</Badge>)}</div></div><div className="grid gap-3 md:grid-cols-2"><label className="block rounded-2xl bg-slate-50 p-4 text-sm font-bold">Status<select value={reportStatus} onChange={(e) => setReportStatus(e.target.value)} className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-3"><option>Entwurf</option><option>Zur Prüfung</option><option>Änderung nötig</option><option>Freigegeben</option></select></label><Field label="Erinnerung" value={reportReminder} onChange={setReportReminder} /></div><TextArea label="Meister-Kommentar" value={reportMasterComment} onChange={setReportMasterComment} /></div><div className="space-y-4"><CopyBox title="Bericht-Vorschlag kopieren" text={reportProposal} /><div className="grid gap-3 md:grid-cols-3"><button onClick={saveReportEntry} className="flex items-center justify-center gap-2 rounded-2xl bg-slate-950 px-4 py-3 text-sm font-bold text-white"><Save size={17} />Speichern</button><button onClick={() => setPdfTarget("Berichtsheft-Eintrag")} className="flex items-center justify-center gap-2 rounded-2xl bg-slate-100 px-4 py-3 text-sm font-bold text-slate-800"><FileText size={17} />Für PDF</button><button onClick={() => window.print()} className="flex items-center justify-center gap-2 rounded-2xl bg-slate-100 px-4 py-3 text-sm font-bold text-slate-800"><Printer size={17} />Drucken</button></div>{reportExportText && <CopyBox title="Berichtsheft-Export kopieren" text={reportExportText} />}</div></div></Card><Card><SectionTitle icon={Save} title="Gespeicherte Berichte" subtitle="Berichte werden lokal gespeichert." /><div className="grid gap-4 md:grid-cols-2">{savedReports.length === 0 && <div className="rounded-2xl bg-slate-50 p-4 text-sm font-bold text-slate-600">Noch keine Berichte gespeichert.</div>}{savedReports.map((entry) => <article key={entry.id} className="rounded-3xl bg-slate-50 p-5"><div className="flex flex-wrap items-center gap-2"><Badge>{entry.mode}</Badge><Badge>{entry.status}</Badge><Badge>{entry.orderId || "ohne Auftrag"}</Badge></div><p className="mt-3 text-xs font-bold text-slate-500">{entry.createdAt}</p><textarea readOnly value={entry.text} className="mt-3 h-32 w-full resize-none rounded-2xl border border-slate-200 bg-white p-3 text-sm leading-6" /><div className="mt-3 grid gap-2 md:grid-cols-2"><button onClick={() => { setReportExportText(entry.text); showNotice("Bericht für Export ausgewählt."); }} className="rounded-2xl bg-slate-950 px-4 py-2 text-sm font-bold text-white">Export auswählen</button><button onClick={() => deleteReport(entry.id)} className="rounded-2xl bg-rose-100 px-4 py-2 text-sm font-bold text-rose-800">Bericht löschen</button></div></article>)}</div></Card></div>)}
+  {active === "reportBook" && screen(<ReportBookPage canReview={canViewLearningTeam} onAddPhotoNote={addPhotoNoteToReport} onApplyTemplate={applyReportTemplate} onApproveLatest={approveLatestReport} onDelete={deleteReport} onExport={exportCurrentReport} onGenerateWeekly={generateWeeklyReport} onImportChecklist={importChecklistIntoReport} onSave={saveReportEntry} onSelectPdf={() => setPdfTarget("Berichtsheft-Eintrag")} reportExportText={reportExportText} reportLearningField={reportLearningField} reportMasterComment={reportMasterComment} reportMode={reportMode} reportProposal={reportProposal} reportReminder={reportReminder} reportStatus={reportStatus} reportTechnicalTerms={reportTerms} reportTemplateId={reportTemplateId} reportText={reportText} reportYear={reportYear} reports={myReports} setReportExportText={setReportExportText} setReportLearningField={setReportLearningField} setReportMasterComment={setReportMasterComment} setReportMode={setReportMode} setReportReminder={setReportReminder} setReportStatus={setReportStatus} setReportTemplateId={setReportTemplateId} setReportText={setReportText} setReportYear={setReportYear} showNotice={showNotice} />)}
   {active === "safety" && screen(<div className="grid gap-5 lg:grid-cols-[0.8fr_1.2fr]"><Card><SectionTitle icon={AlertTriangle} title="Sicherheits- und Warnsystem" subtitle="Kritische Kombinationen werden sichtbar gemacht." /><div className="space-y-3">{["WDVS: Lastabtragung und Abdichtung prüfen", "Markise: hohe Hebel- und Zugkräfte", "Elektro: Spannungsfreiheit und fachgerechte Messung", "Wind: Herstellerangaben und Sensorik beachten"].map((w) => <div key={w} className="rounded-2xl bg-amber-50 p-4 text-sm font-bold text-amber-900">{w}</div>)}</div></Card><Card><SectionTitle icon={ShieldCheck} title="Warnhinweise" subtitle="Nicht als automatische Freigabe nutzen." /><p className="text-sm leading-6 text-slate-600">Herstellerangaben, Untergrund, Befestigung, Gebäudehöhe und Fachprüfung bleiben verbindlich.</p></Card></div>)}
     {active === "norms" && screen(<NormsPage checkButton={checkButton} moduleChecks={moduleChecks} selectedOrder={selectedOrder} selectedProduct={selectedProduct} />)}
     {(active === "pdf" || active === "documents") && screen(<PdfExportPage currentPdfTemplate={currentPdfTemplate} getPdfValue={getPdfValue} pdfDocuments={pdfDocuments} pdfFileName={pdfFileName} pdfPreviewLines={pdfPreviewLines} pdfTarget={pdfTarget} pdfTemplateDefinitions={pdfTemplateDefinitions} resetPdfTemplate={resetPdfTemplate} savePdfDocument={savePdfDocument} selectedOrder={selectedOrder} selectedProduct={selectedProduct} setPdfField={setPdfField} setPdfTarget={setPdfTarget} updatePdfDocumentStatus={updatePdfDocumentStatus} />)}

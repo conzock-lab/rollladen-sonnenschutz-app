@@ -1,0 +1,7 @@
+import React from "react";
+import { History, Play } from "lucide-react";
+import { Badge } from "../CheckItem";
+
+export default function DiagnosisHistory({ onResume, sessions = [] }) {
+  return <section className="rounded-3xl bg-slate-50 p-4 md:p-5"><div className="flex items-center gap-2"><History size={18} /><h3 className="font-black">Diagnose-Verlauf</h3></div><div className="mt-4 grid gap-3 md:grid-cols-2">{sessions.map((session) => <article key={session.id} className="rounded-2xl bg-white p-4"><div className="flex flex-wrap gap-2"><Badge>{session.context?.orderId || "ohne Auftrag"}</Badge><Badge>{session.orderStatus || session.result?.orderStatus || "offen"}</Badge><Badge>{session.status === "completed" ? "abgeschlossen" : session.status === "paused" ? "pausiert" : "in Bearbeitung"}</Badge></div><h4 className="mt-3 font-black">{session.title}</h4><p className="mt-1 text-xs font-semibold text-slate-500">{new Date(session.updatedAt || session.createdAt).toLocaleString("de-DE")}</p>{session.status !== "completed" && <button type="button" onClick={() => onResume(session)} className="mt-3 flex min-h-11 w-full items-center justify-center gap-2 rounded-xl bg-slate-100 text-xs font-black"><Play size={15} />Fortsetzen</button>}</article>)}{!sessions.length && <p className="rounded-2xl bg-white p-4 text-sm font-bold text-slate-500">Noch keine Diagnose gespeichert oder pausiert.</p>}</div></section>;
+}

@@ -33,7 +33,8 @@ import {
 
 const ALL_INTERNAL_ROLES = ["dev", "meister", "buero", "vorarbeiter", "monteur", "azubi"];
 const FIELD_ROLES = ["dev", "meister", "vorarbeiter", "monteur", "azubi"];
-const LEARNING_ROLES = ["dev", "meister", "buero", "vorarbeiter", "azubi"];
+const LEARNING_ROLES = ["dev", "meister", "buero", "vorarbeiter", "monteur", "azubi"];
+const REPORT_BOOK_ROLES = ["dev", "meister", "buero", "azubi"];
 
 export const navigationGroups = [
   {
@@ -98,9 +99,9 @@ export const navigationGroups = [
     defaultId: "learning",
     items: [
       { id: "learning", label: "Lernmodule", icon: GraduationCap, roles: LEARNING_ROLES, keywords: ["lernen", "ausbildungsjahr", "fortschritt"] },
-      { id: "quiz", label: "Quiz", icon: ClipboardCheck, roles: ["dev", "meister", "azubi"], keywords: ["fragen", "wissenstest"] },
-      { id: "reportBook", label: "Berichtsheft", icon: NotebookPen, roles: LEARNING_ROLES, keywords: ["tagesbericht", "wochenbericht", "ausbildung"] },
-      { id: "azubiPlan", label: "Azubi-Fortschritt", icon: GraduationCap, roles: LEARNING_ROLES, keywords: ["lernstand", "lernplan", "fortschritt"] },
+      { id: "quiz", label: "Quiz", icon: ClipboardCheck, roles: LEARNING_ROLES, keywords: ["fragen", "wissenstest"] },
+      { id: "reportBook", label: "Berichtsheft", icon: NotebookPen, roles: REPORT_BOOK_ROLES, keywords: ["tagesbericht", "wochenbericht", "ausbildung"] },
+      { id: "azubiPlan", label: "Azubi-Fortschritt", icon: GraduationCap, roles: REPORT_BOOK_ROLES, keywords: ["lernstand", "lernplan", "fortschritt"] },
     ],
   },
   {
