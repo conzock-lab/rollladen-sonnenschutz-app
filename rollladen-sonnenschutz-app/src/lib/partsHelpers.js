@@ -1,90 +1,109 @@
-export const PART_REQUEST_STATUSES = ["offen", "angefragt", "bestellt", "geliefert", "erledigt"];
+import { allPartPhotoRequirements, getPartPhotoRequirements } from "../data/parts.js";
 
-export const PART_PHOTO_REQUIREMENTS = [
-  "Typenschildfoto",
-  "Gesamtansicht",
-  "Detailfoto",
-  "Maßfoto",
-  "Schadenfoto",
-];
+export const PART_REQUEST_STATUSES = ["Entwurf", "Anfrage vorbereitet", "Angefragt", "Rückfrage", "Bestellt", "Liefertermin bekannt", "Geliefert", "Verbaut", "Erledigt"];
 
-export const PART_PRODUCT_OPTIONS = [
-  "Rollladen",
-  "Markise",
-  "Raffstore",
-  "ZIP-Screen",
-  "Insektenschutz",
-  "Rolltor",
-  "Rohrmotor",
-  "Motor",
-  "Rollladen/Screen",
-  "Funk/Steuerung",
-  "Sensorik",
-  "Sensorik/Smart Home",
-];
+export function normalizePartRequestStatus(status = "") {
+  const normalized = String(status || "").toLocaleLowerCase("de-DE");
+  if (!normalized || normalized === "offen") return "Entwurf";
+  if (normalized === "vorbereitet") return "Anfrage vorbereitet";
+  return PART_REQUEST_STATUSES.find((item) => item.toLocaleLowerCase("de-DE") === normalized) || status;
+}
 
-export function createEmptyPartRequest(order = null) {
+export const PART_PHOTO_REQUIREMENTS = allPartPhotoRequirements;
+export { getPartPhotoRequirements };
+
+export const PART_PRODUCT_OPTIONS = ["Rollladen", "Markise", "Raffstore", "ZIP-Screen", "Insektenschutz", "Rolltor", "Motor"];
+
+export function createEmptyPartRequest(order = null, prefill = {}) {
+  const productLabels = {
+    vorbaurollladen: "Rollladen",
+    aufsatzrollladen: "Rollladen",
+    markise: "Markise",
+    raffstore: "Raffstore",
+    zipscreen: "ZIP-Screen",
+    screen_offen: "ZIP-Screen",
+    insektenschutz: "Insektenschutz",
+    rolltor: "Rolltor",
+    garagentor_antrieb: "Rolltor",
+  };
   return {
     id: "",
     draftKey: `PART-DRAFT-${Date.now()}`,
     orderId: order?.id || "",
     customer: order?.customer || "",
-    product: "Rollladen",
-    manufacturer: "",
+    includeAddress: false,
+    product: productLabels[order?.product] || "Rollladen",
+    manufacturer: order?.manufacturer || "",
     part: "",
+    requestedPart: "",
     year: "",
-    serial: "",
-    nameplate: "",
+    serial: order?.serial || "",
+    type: order?.type || "",
+    nameplate: order?.nameplate || "",
     dimensions: "",
     color: "",
+    profile: "",
+    shaft: "",
+    guide: "",
+    motor: order?.drive || "",
+    control: order?.control || "",
     side: "unbekannt",
+    quantity: "1",
     shaftProfileGuide: "",
-    motorControl: "",
+    motorControl: order?.drive || "",
     errorDescription: "",
     urgency: "normal",
-    status: "offen",
+    status: "Entwurf",
+    diagnosisId: "",
+    ...prefill,
   };
 }
 
 const valueOrUnknown = (value, fallback = "nicht bekannt") => String(value || "").trim() || fallback;
 
 export function buildPartRequestText(request, order, photoChecks = {}) {
-  const photoLines = PART_PHOTO_REQUIREMENTS.map((item) => `${photoChecks[item] ? "[x]" : "[ ]"} ${item}`).join("\n");
+  const requirements = getPartPhotoRequirements(request.product);
+  const photoLines = requirements.map((item) => `${photoChecks[item] ? "[x]" : "[ ]"} ${item}`).join("\n");
   const customer = valueOrUnknown(request.customer || order?.customer, "nicht angegeben");
   const orderId = valueOrUnknown(request.orderId || order?.id, "ohne Auftragsnummer");
+  const addressLine = request.includeAddress && order?.address ? `- Einsatzort: ${order.address}\n` : "";
 
-  return `Betreff: Ersatzteilanfrage – ${valueOrUnknown(request.product, "Produkt unbekannt")} / ${valueOrUnknown(request.part, "Bauteil zu bestimmen")} – Auftrag ${orderId}
+  return `Betreff: Unterstützung bei Ersatzteil-Identifikation – ${valueOrUnknown(request.product, "Produkt unbekannt")} – Auftrag ${orderId}
 
 Guten Tag,
 
-für die nachfolgend beschriebene Anlage bitten wir um Prüfung und ein Angebot für ein passendes Ersatzteil beziehungsweise eine kompatible Alternative.
+für folgenden Auftrag benötigen wir Unterstützung bei der Identifikation eines passenden Ersatzteils beziehungsweise einer kompatiblen Alternative.
 
 Auftragsbezug
 - Auftrag: ${orderId}
 - Kunde/Objekt: ${customer}
-- Einsatzort: ${valueOrUnknown(order?.address, "nicht angegeben")}
-- Dringlichkeit: ${valueOrUnknown(request.urgency, "normal")}
+${addressLine}- Dringlichkeit: ${valueOrUnknown(request.urgency, "normal")}
 
-Anlage und Bauteil
-- Produktart: ${valueOrUnknown(request.product)}
+Produkt und Bauteil
+- Produkt: ${valueOrUnknown(request.product)}
 - Hersteller: ${valueOrUnknown(request.manufacturer)}
-- Gesuchtes Bauteil: ${valueOrUnknown(request.part, "bitte anhand der Daten bestimmen")}
-- Baujahr: ${valueOrUnknown(request.year)}
+- Bauteil / mögliche Ersatzteilgruppe: ${valueOrUnknown(request.part, "noch zu bestimmen")}
+- Gewünschtes Ersatzteil: ${valueOrUnknown(request.requestedPart, "Identifikation/Angebot erbeten")}
+- Typ/Baujahr: ${valueOrUnknown(request.type)} / ${valueOrUnknown(request.year)}
 - Seriennummer: ${valueOrUnknown(request.serial)}
 - Typenschilddaten: ${valueOrUnknown(request.nameplate)}
 - Maße: ${valueOrUnknown(request.dimensions)}
 - Farbe/Oberfläche: ${valueOrUnknown(request.color)}
+- Profil: ${valueOrUnknown(request.profile || request.shaftProfileGuide)}
+- Welle: ${valueOrUnknown(request.shaft || request.shaftProfileGuide)}
+- Führung: ${valueOrUnknown(request.guide || request.shaftProfileGuide)}
+- Motor: ${valueOrUnknown(request.motor || request.motorControl)}
+- Steuerung: ${valueOrUnknown(request.control || request.motorControl)}
 - Seite: ${valueOrUnknown(request.side)}
-- Welle/Profil/Führung: ${valueOrUnknown(request.shaftProfileGuide)}
-- Motor/Steuerung: ${valueOrUnknown(request.motorControl)}
+- Anzahl: ${valueOrUnknown(request.quantity, "1")}
 
-Fehlerbeschreibung
+Fehlerbild
 ${valueOrUnknown(request.errorDescription, "Fehlerbild noch zu ergänzen")}
 
-Foto-Nachweise
+Vorhandene Fotos
 ${photoLines}
 
-Bitte teilen Sie uns Artikelnummer, Preis, Lieferzeit, Kompatibilität und gegebenenfalls zusätzlich benötigte Adapter oder Befestigungsteile mit. Bitte weisen Sie auf notwendige Alternativen hin, falls das Originalteil nicht mehr verfügbar ist.
+Bitte prüfen Sie, welche Ersatzteilgruppe beziehungsweise welches konkrete Teil zur angegebenen Anlage passt. Bitte nennen Sie – sofern anhand der Unterlagen eindeutig möglich – Artikelnummer, Kompatibilität, Preis, Lieferzeit und zusätzlich benötigte Adapter oder Befestigungsteile.
 
 Mit freundlichen Grüßen
 

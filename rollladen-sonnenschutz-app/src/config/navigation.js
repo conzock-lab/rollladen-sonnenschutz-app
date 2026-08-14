@@ -33,6 +33,7 @@ import {
 
 const ALL_INTERNAL_ROLES = ["dev", "meister", "buero", "vorarbeiter", "monteur", "azubi"];
 const FIELD_ROLES = ["dev", "meister", "vorarbeiter", "monteur", "azubi"];
+const LEARNING_ROLES = ["dev", "meister", "buero", "vorarbeiter", "azubi"];
 
 export const navigationGroups = [
   {
@@ -44,70 +45,73 @@ export const navigationGroups = [
     ],
   },
   {
-    id: "work",
-    label: "Arbeit",
+    id: "orders",
+    label: "Aufträge",
     icon: BriefcaseBusiness,
+    defaultId: "orders",
     items: [
       { id: "today", label: "Heute", icon: CalendarDays, roles: ALL_INTERNAL_ROLES, keywords: ["tagesplanung", "termine"] },
       { id: "orders", label: "Aufträge", shortLabel: "Aufträge", icon: BriefcaseBusiness, roles: ALL_INTERNAL_ROLES, mobilePriority: 2, keywords: ["auftrag", "auftragsnummer", "kunde", "baustelle"] },
       { id: "customers", label: "Kunden", icon: UsersRound, roles: ["dev", "meister", "buero", "vorarbeiter"], keywords: ["kundenname", "kommunikation", "rückfrage"] },
       { id: "measurement", label: "Aufmaß", icon: Wrench, roles: ["dev", "meister", "buero", "vorarbeiter", "monteur", "azubi"], keywords: ["maße", "messen", "breite", "höhe"] },
+      { id: "checklists", label: "Checklisten", icon: ClipboardCheck, roles: FIELD_ROLES, keywords: ["prüfschritte", "montage", "kontrolle"] },
       { id: "closeOrder", label: "Auftrag abschließen", icon: CheckCircle2, roles: ["dev", "meister", "vorarbeiter", "monteur"], keywords: ["abschluss", "erledigt", "nacharbeit"] },
+      { id: "offers", label: "Angebote", icon: Euro, roles: ["dev", "meister", "buero"], keywords: ["angebot", "preis", "kalkulation"] },
+      { id: "pdf", label: "PDF / Protokolle", icon: FileText, roles: ["dev", "meister", "buero", "vorarbeiter", "monteur"], keywords: ["pdf", "protokoll", "druck", "montageprotokoll"] },
+      { id: "documents", label: "Dokumente", icon: Files, roles: ["dev", "meister", "buero", "vorarbeiter", "monteur"], keywords: ["dokument", "archiv", "status"] },
     ],
   },
   {
     id: "technology",
     label: "Technik",
     icon: Wrench,
+    defaultId: "diagnose",
     items: [
-      { id: "diagnose", label: "Fehlerdiagnose", shortLabel: "Diagnose", icon: HelpCircle, roles: FIELD_ROLES, mobilePriority: 3, keywords: ["motor brummt", "fehler", "störung", "gurtwickler"] },
-      { id: "motors", label: "Motoren & Steuerungen", icon: Zap, roles: FIELD_ROLES, keywords: ["somfy", "rohrmotor", "funkmotor", "sensor", "steuerung"] },
-      { id: "substrates", label: "Untergrund-Assistent", icon: HardHat, roles: FIELD_ROLES, keywords: ["wdvs", "beton", "lochstein", "klinker", "holz", "stahl"] },
-      { id: "parts", label: "Ersatzteil-Finder", icon: PackageSearch, roles: FIELD_ROLES, keywords: ["ersatzteil", "profil", "welle", "führung"] },
-      { id: "photos", label: "Foto-KI", shortLabel: "Foto", icon: Camera, roles: FIELD_ROLES, mobilePriority: 4, keywords: ["foto", "typenschild", "schaden"] },
+      { id: "technical", label: "Technik-Suche", icon: Search, roles: ALL_INTERNAL_ROLES, keywords: ["technik", "hersteller", "motor", "ersatzteil", "diagnose"] },
+      { id: "diagnose", label: "Erweiterte Fehlerdiagnose", shortLabel: "Diagnose", icon: HelpCircle, roles: ALL_INTERNAL_ROLES, mobilePriority: 3, keywords: ["motor brummt", "fehler", "störung", "gurtwickler"] },
+      { id: "motors", label: "Motoren & Steuerungen", icon: Zap, roles: ALL_INTERNAL_ROLES, keywords: ["somfy", "rohrmotor", "funkmotor", "sensor", "steuerung"] },
+      { id: "substrates", label: "Untergrund-Assistent", icon: HardHat, roles: ALL_INTERNAL_ROLES, keywords: ["wdvs", "beton", "lochstein", "klinker", "holz", "stahl"] },
+      { id: "parts", label: "Ersatzteil-Finder", icon: PackageSearch, roles: ALL_INTERNAL_ROLES, keywords: ["ersatzteil", "profil", "welle", "führung"] },
+      { id: "photos", label: "Foto-KI", shortLabel: "Foto", icon: Camera, roles: ALL_INTERNAL_ROLES, mobilePriority: 4, keywords: ["foto", "typenschild", "schaden"] },
+      { id: "ki", label: "KI-Assistent", icon: Search, roles: ALL_INTERNAL_ROLES, keywords: ["assistent", "prüfschritte", "auftrag"] },
     ],
   },
   {
     id: "knowledge",
     label: "Wissen",
     icon: BookOpen,
+    defaultId: "products",
     items: [
-      { id: "products", label: "Produkt-Lexikon", icon: Sun, roles: ["dev", "meister", "buero", "vorarbeiter", "monteur", "azubi"], keywords: ["markise", "raffstore", "zip-screen", "rollladen", "insektenschutz"] },
-      { id: "manufacturers", label: "Hersteller", icon: Database, roles: ["dev", "meister", "buero", "vorarbeiter", "azubi"], keywords: ["somfy", "selve", "elero", "hersteller"] },
-      { id: "tools", label: "Werkzeug & Material", icon: Hammer, roles: FIELD_ROLES, keywords: ["werkzeug", "bohrer", "material"] },
-      { id: "maintenance", label: "Wartung & Pflege", icon: RefreshCw, roles: FIELD_ROLES, keywords: ["pflege", "wartung", "inspektion"] },
-      { id: "norms", label: "Normen & Sicherheit", icon: ShieldCheck, roles: ["dev", "meister", "buero", "vorarbeiter", "azubi"], keywords: ["din", "norm", "sicherheit", "vorschrift"] },
-      { id: "knowledge", label: "Skizzen", icon: Layers, roles: FIELD_ROLES, keywords: ["skizze", "aufmaß", "bohrpunkte"] },
+      { id: "products", label: "Produkt-Lexikon", icon: Sun, roles: ALL_INTERNAL_ROLES, keywords: ["markise", "raffstore", "zip-screen", "rollladen", "insektenschutz"] },
+      { id: "manufacturers", label: "Herstellerdatenbank", icon: Database, roles: ALL_INTERNAL_ROLES, keywords: ["somfy", "selve", "elero", "hersteller"] },
+      { id: "tools", label: "Werkzeug & Material", icon: Hammer, roles: ALL_INTERNAL_ROLES, keywords: ["werkzeug", "bohrer", "material"] },
+      { id: "maintenance", label: "Wartung & Pflege", icon: RefreshCw, roles: ALL_INTERNAL_ROLES, keywords: ["pflege", "wartung", "inspektion"] },
+      { id: "norms", label: "Normen & Sicherheit", icon: ShieldCheck, roles: ALL_INTERNAL_ROLES, keywords: ["din", "norm", "sicherheit", "vorschrift"] },
+      { id: "safety", label: "Sicherheits-Hinweise", icon: ShieldCheck, roles: ALL_INTERNAL_ROLES, keywords: ["warnsystem", "elektro", "wind", "befestigung"] },
+      { id: "knowledge", label: "Skizzen", icon: Layers, roles: ALL_INTERNAL_ROLES, keywords: ["skizze", "aufmaß", "bohrpunkte"] },
     ],
   },
   {
-    id: "training",
-    label: "Ausbildung",
+    id: "learning",
+    label: "Lernen",
     icon: GraduationCap,
+    defaultId: "learning",
     items: [
-      { id: "learning", label: "Lernmodus", icon: GraduationCap, roles: ["dev", "meister", "azubi"], keywords: ["lernen", "ausbildungsjahr", "fortschritt"] },
+      { id: "learning", label: "Lernmodule", icon: GraduationCap, roles: LEARNING_ROLES, keywords: ["lernen", "ausbildungsjahr", "fortschritt"] },
       { id: "quiz", label: "Quiz", icon: ClipboardCheck, roles: ["dev", "meister", "azubi"], keywords: ["fragen", "wissenstest"] },
-      { id: "reportBook", label: "Berichtsheft", icon: NotebookPen, roles: ["dev", "meister", "azubi"], keywords: ["tagesbericht", "wochenbericht", "ausbildung"] },
+      { id: "reportBook", label: "Berichtsheft", icon: NotebookPen, roles: LEARNING_ROLES, keywords: ["tagesbericht", "wochenbericht", "ausbildung"] },
+      { id: "azubiPlan", label: "Azubi-Fortschritt", icon: GraduationCap, roles: LEARNING_ROLES, keywords: ["lernstand", "lernplan", "fortschritt"] },
     ],
   },
   {
-    id: "documents",
-    label: "Dokumente",
-    icon: Files,
-    items: [
-      { id: "pdf", label: "PDF / Protokolle", icon: FileText, roles: ["dev", "meister", "buero", "vorarbeiter", "monteur"], keywords: ["pdf", "protokoll", "druck", "montageprotokoll"] },
-      { id: "offers", label: "Angebote", icon: Euro, roles: ["dev", "meister", "buero"], keywords: ["angebot", "preis", "kalkulation"] },
-      { id: "documents", label: "Dokumentenübersicht", icon: Files, roles: ["dev", "meister", "buero", "vorarbeiter", "monteur"], keywords: ["dokument", "archiv", "status"] },
-    ],
-  },
-  {
-    id: "administration",
-    label: "Verwaltung",
+    id: "company",
+    label: "Firma",
     icon: Building2,
+    defaultId: "company",
     items: [
       { id: "company", label: "Firma & Team", icon: UserRound, roles: ["dev", "meister", "buero"], keywords: ["mitarbeiter", "team", "code", "firma"] },
-      { id: "rights", label: "Rechte", icon: ShieldCheck, roles: ["dev", "meister", "buero"], keywords: ["rolle", "berechtigung", "rls"] },
-      { id: "planning", label: "Planung / Baustellenplanung", icon: ClipboardList, roles: ["dev", "meister", "buero", "vorarbeiter"], keywords: ["kolonne", "team zuweisen", "planung"] },
+      { id: "planning", label: "Baustellen- / Teamplanung", icon: ClipboardList, roles: ["dev", "meister", "buero", "vorarbeiter"], keywords: ["kolonne", "team zuweisen", "planung"] },
+      { id: "rights", label: "Rechte & Rollen", icon: ShieldCheck, roles: ["dev", "meister", "buero"], keywords: ["rolle", "berechtigung", "rls"] },
     ],
   },
   {
@@ -119,25 +123,45 @@ export const navigationGroups = [
     ],
   },
   {
-    id: "customer",
-    label: "Kundenbereich",
-    icon: Home,
+    id: "customerAppointments",
+    label: "Meine Termine & Aufträge",
+    icon: CalendarDays,
     customerOnly: true,
     items: [
       { id: "portal", label: "Meine Termine & Aufträge", shortLabel: "Termine", icon: CalendarDays, roles: ["kunde"], mobilePriority: 2, keywords: ["termin", "auftrag", "status"] },
+    ],
+  },
+  {
+    id: "customerDocuments",
+    label: "Dokumente",
+    icon: FileText,
+    customerOnly: true,
+    items: [
       { id: "customerDocuments", label: "Dokumente", shortLabel: "Dokumente", icon: FileText, roles: ["kunde"], mobilePriority: 3, keywords: ["pdf", "protokoll", "dokument"] },
-      { id: "customerCare", label: "Pflegehinweise", shortLabel: "Pflege", icon: RefreshCw, roles: ["kunde"], mobilePriority: 4, keywords: ["pflege", "wartung", "bedienung"] },
+    ],
+  },
+  {
+    id: "customerCare",
+    label: "Pflege & Wartung",
+    icon: RefreshCw,
+    customerOnly: true,
+    items: [
+      { id: "customerCare", label: "Pflege & Wartung", shortLabel: "Pflege", icon: RefreshCw, roles: ["kunde"], mobilePriority: 4, keywords: ["pflege", "wartung", "bedienung"] },
+    ],
+  },
+  {
+    id: "customerContact",
+    label: "Kontakt / Rückfrage",
+    icon: MessageSquareText,
+    customerOnly: true,
+    items: [
       { id: "customerContact", label: "Kontakt / Rückfrage", icon: MessageSquareText, roles: ["kunde"], keywords: ["kontakt", "frage", "ansprechpartner"] },
     ],
   },
 ];
 
 export const hiddenPages = [
-  { id: "checklists", label: "Checklisten", icon: ClipboardCheck, roles: FIELD_ROLES },
   { id: "workflow", label: "Auftrags-Workflow", icon: ClipboardList, roles: ["dev", "meister", "buero", "vorarbeiter", "monteur"] },
-  { id: "azubiPlan", label: "Azubi-Plan", icon: GraduationCap, roles: ["dev", "meister", "azubi"] },
-  { id: "safety", label: "Warnsystem", icon: ShieldCheck, roles: ["dev", "meister", "buero", "vorarbeiter", "monteur", "azubi"] },
-  { id: "ki", label: "KI-Assistent", icon: Search, roles: ALL_INTERNAL_ROLES },
 ];
 
 const isAllowed = (entry, role) => role === "dev" || entry.roles?.includes(role);
@@ -166,4 +190,3 @@ export function getMobilePrimaryItems(role) {
 export function findNavigationItem(id) {
   return [...navigationItems, ...hiddenPages].find((item) => item.id === id);
 }
-

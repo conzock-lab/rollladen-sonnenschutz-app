@@ -50,16 +50,36 @@ import DesktopSidebar from "./components/DesktopSidebar";
 import GlobalSearch from "./components/GlobalSearch";
 import MobileBottomNav from "./components/MobileBottomNav";
 import QuickAccessBar from "./components/QuickAccessBar";
+import SectionTabs from "./components/SectionTabs";
+import OrderChecklist from "./components/order/OrderChecklist";
+import OrderMeasurement from "./components/order/OrderMeasurement";
+import OrderPhotos, { REQUIRED_ORDER_PHOTOS } from "./components/order/OrderPhotos";
 import useOnlineStatus from "./hooks/useOnlineStatus";
 import useAutoSync from "./hooks/useAutoSync";
 import useLocalStorage, { loadJson, saveJson } from "./hooks/useLocalStorage";
+import useRoleNavigation from "./hooks/useRoleNavigation";
 import { supabase, isSupabaseConfigured } from "./lib/supabase";
-import { enqueueSyncItem, ensureRetryQueued, markQueueSynced as markQueueItemsSynced, queueLocalChange as replaceLocalChange } from "./lib/syncQueue";
+import {
+  enqueueSyncItem,
+  ensureRetryQueued,
+  getAutoSyncState,
+  getQueueSummary,
+  getSyncableQueueItems,
+  markQueueFailed,
+  markQueueSyncing,
+  markQueueSynced as markQueueItemsSynced,
+  queueLocalChange as replaceLocalChange,
+  restoreSyncQueue,
+  retryFailedQueue,
+} from "./lib/syncQueue";
+import { saveCompanySnapshot } from "./services/supabaseSync";
 import { buildPdfPreview, createPdfFileName } from "./lib/pdfHelpers";
-import { buildPartRequestText, createEmptyPartRequest, PART_PHOTO_REQUIREMENTS } from "./lib/partsHelpers";
+import { buildOrderOpenItems, getOrderSyncStatus } from "./lib/orderWorkspace";
+import { buildPartRequestText, createEmptyPartRequest, getPartPhotoRequirements } from "./lib/partsHelpers";
 import { productTypes, checklistTemplates, dynamicChecklistRules, measurementRequiredFields } from "./data/products";
+import { normalizeOrderStatus } from "./data/orders";
 import { allManufacturers } from "./data/manufacturers";
-import { allDiagnosisTrees, allPartCatalog } from "./data/diagnosis";
+import { allDiagnosisTrees } from "./data/diagnosis";
 import { reportActivityTemplates, reportLearningFields, reportTechnicalTerms, quizCards, sketchCards, azubiLearningModules, allQuizCards, expandedLearningModules, learningModules, isLearningModuleComplete } from "./data/learningModules";
 import { roles, roleHomeConfig, teamRoleOptions } from "./data/rights";
 import DashboardPage from "./pages/DashboardPage";
@@ -77,11 +97,12 @@ import PartsPage from "./pages/PartsPage";
 import ManufacturersPage from "./pages/ManufacturersPage";
 import DiagnosisPage from "./pages/DiagnosisPage";
 import MotorsPage from "./pages/MotorsPage";
+import TechnicalSearchPage from "./pages/TechnicalSearchPage";
 import SubstratesPage from "./pages/SubstratesPage";
 import ToolsPage from "./pages/ToolsPage";
 import ProductLexiconPage from "./pages/ProductLexiconPage";
 import CustomerPortalPage from "./pages/CustomerPortalPage";
-import { getAllowedPages, getMobilePrimaryItems, getNavigationGroups, navigationItems } from "./config/navigation";
+import { navigationItems } from "./config/navigation";
 
 const todayIso = () => new Date().toISOString().slice(0, 10);
 
@@ -272,21 +293,22 @@ const defaultCompanyPeople = () => [
 const workflowStages = [
   { id: "request", title: "Anfrage", text: "Kundenwunsch, Produkt, Adresse und Wunschtermin aufnehmen.", actions: [{ id: "prepare", label: "Auftrag vorbereiten", module: "orders" }] },
   { id: "planning", title: "Planung", text: "Termin festlegen, Zuständigkeit klären und das passende Team einplanen.", actions: [{ id: "team", label: "Team zuweisen", module: "planning" }] },
-  { id: "execution", title: "Durchführung", text: "Arbeiten vor Ort ausführen und die wichtigsten Nachweise festhalten.", actions: [{ id: "checklist", label: "Checkliste öffnen", module: "checklists" }, { id: "photos", label: "Fotos prüfen", module: "photos" }] },
+  { id: "preparation", title: "Vorbereitung", text: "Aufmaß, Material, Befestigung und Checkliste vor dem Einsatz prüfen.", actions: [{ id: "measurement", label: "Aufmaß öffnen", module: "measurement" }, { id: "checklist", label: "Checkliste öffnen", module: "checklists" }] },
+  { id: "installation", title: "Durchführung", text: "Arbeiten vor Ort ausführen und Fotos sowie wichtige Nachweise festhalten.", actions: [{ id: "photos", label: "Fotos hinzufügen", module: "photos" }, { id: "parts", label: "Ersatzteile prüfen", module: "parts" }] },
   { id: "completion", title: "Abschluss", text: "Funktion, Sicherheit, Einweisung und offene Punkte gemeinsam prüfen.", actions: [{ id: "close", label: "Abschluss prüfen", module: "closeOrder" }, { id: "rework", label: "Nacharbeit erstellen" }] },
   { id: "documents", title: "Dokumentation", text: "Protokoll und PDF bereitstellen; kaufmännische Bearbeitung anschließend abschließen.", actions: [{ id: "pdf", label: "PDF erstellen", module: "pdf" }] },
   { id: "done", title: "Erledigt", text: "Der Auftrag ist vollständig bearbeitet und kann geordnet abgelegt werden.", actions: [{ id: "archive", label: "Archivieren" }] },
 ];
 
 
-function TopBar({ role, setRole, offline, pendingSyncCount, lastSyncedAt, syncError, compact, currentUser, search }) {
+function TopBar({ role, setRole, offline, pendingSyncCount, failedSyncCount, lastSyncedAt, syncError, syncing, onRetrySync, compact, currentUser, search }) {
   const selected = roles.find((item) => item.id === role) || roles[0];
   const canSwitchRole = currentUser?.role === "dev";
   return <div className="sticky top-3 z-30 mb-4 rounded-[1.5rem] border border-slate-200 bg-white/90 p-3 shadow-sm backdrop-blur">
     <div className={`flex gap-3 ${compact ? "flex-col" : "items-center"}`}>
       <div className="flex shrink-0 items-center gap-2"><div className="flex min-h-11 items-center gap-2 rounded-2xl bg-slate-950 px-3 text-white"><UserRound size={18} /><span className="text-sm font-bold">{currentUser?.name || "Nutzer"}</span></div>{canSwitchRole ? <select value={role} onChange={(event) => setRole(event.target.value)} className="min-h-11 rounded-2xl border border-slate-200 bg-white px-3 text-sm font-bold outline-none">{roles.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}</select> : <div className="flex min-h-11 items-center rounded-2xl border border-slate-200 bg-slate-50 px-3 text-sm font-bold text-slate-700">{selected.label}</div>}</div>
       {!compact && search}
-      <div className="shrink-0"><StatusBadge offline={offline} pendingCount={pendingSyncCount} lastSyncedAt={lastSyncedAt} error={syncError} /></div>
+      <div className="shrink-0"><StatusBadge offline={offline} pendingCount={pendingSyncCount} failedCount={failedSyncCount} lastSyncedAt={lastSyncedAt} error={syncError} syncing={syncing} onRetry={onRetrySync} showTechnicalDetails={currentUser?.role === "dev"} /></div>
     </div>
   </div>;
 }
@@ -400,7 +422,7 @@ export default function App() {
   const [orders, setOrders] = useState(() => loadJson("rs-orders", [{ id: "A-1001", customer: "Musterkunde GmbH", contact: "Max Mustermann", phone: "", email: "", address: "Musterstraße 1", date: todayIso(), time: "08:00", assignedTo: "Max Mustermann", product: "vorbaurollladen", substrate: "WDVS", drive: "Funkmotor", installType: "Renovierung", windCritical: true, status: "offen", priority: "normal", orderType: "Montage", notes: "3 Elemente, Funkmotor, WDVS prüfen" }]));
   const [selectedOrderId, setSelectedOrderId] = useState(() => loadJson("rs-selected-order", "A-1001"));
   const [checks, setChecks] = useState(() => loadJson("rs-checks", {}));
-  const [photos, setPhotos] = useState({});
+  const [photos, setPhotos] = useState(() => loadJson("rs-order-photos", {}));
   const [notes, setNotes] = useState(() => loadJson("rs-notes", []));
   const [savedReports, setSavedReports] = useState(() => loadJson("rs-saved-reports", []));
   const [measurementValues, setMeasurementValues] = useState(() => loadJson("rs-measurements", {}));
@@ -414,10 +436,16 @@ export default function App() {
   const [diagnosisQuery, setDiagnosisQuery] = useState("");
   const [diagnosisCategory, setDiagnosisCategory] = useState("all");
   const [partQuery, setPartQuery] = useState("");
-  const [partGroup, setPartGroup] = useState("all");
+  const [partMode, setPartMode] = useState("search");
   const [partRequest, setPartRequest] = useState(() => createEmptyPartRequest());
   const [partRequests, setPartRequests] = useLocalStorage("rs-part-requests", []);
   const [manufacturerQuery, setManufacturerQuery] = useState("");
+  const [motorQuery, setMotorQuery] = useState("");
+  const [technicalQuery, setTechnicalQuery] = useState("");
+  const [manufacturerFavorites, setManufacturerFavorites] = useLocalStorage("rs-manufacturer-favorites", []);
+  const [motorFavorites, setMotorFavorites] = useLocalStorage("rs-motor-favorites", []);
+  const [technicalRecents, setTechnicalRecents] = useLocalStorage("rs-technical-recents", []);
+  const [technicalNotes, setTechnicalNotes] = useLocalStorage("rs-technical-notes", {});
   const [calc, setCalc] = useState({ count: 3, material: 420, labor: 4, rate: 65, travel: 45, wdvs: 0, disposal: 0 });
   const [reportText, setReportText] = useState("Heute Vorbaurollladen montiert, Führungsschienen gebohrt, Motor eingestellt und Kunden eingewiesen.");
   const [reportMode, setReportMode] = useState("Tagesbericht");
@@ -444,9 +472,10 @@ export default function App() {
   const [companyAuthMode, setCompanyAuthMode] = useState("register");
   const [pendingRegistration, setPendingRegistration] = useState(() => loadJson("rs-pending-registration", null));
   const [initialCloudLoaded, setInitialCloudLoaded] = useState(false);
-  const [syncQueue, setSyncQueue] = useLocalStorage("rs-sync-queue", []);
+  const [syncQueue, setSyncQueue] = useLocalStorage("rs-sync-queue", [], { normalize: restoreSyncQueue });
   const [lastSyncedAt, setLastSyncedAt] = useLocalStorage("rs-last-synced-at", "");
   const [syncError, setSyncError] = useState("");
+  const [syncing, setSyncing] = useState(false);
   const [pdfDocuments, setPdfDocuments] = useState(() => loadJson("rs-pdf-documents", []));
   const [moduleChecks, setModuleChecks] = useState(() => loadJson("rs-module-checks", {}));
   const [learningProgress, setLearningProgress] = useLocalStorage("rs-learning-progress", {});
@@ -457,14 +486,11 @@ export default function App() {
   const [sidebarCollapsed, setSidebarCollapsed] = useLocalStorage("rs-sidebar-collapsed", false);
   const syncInFlightRef = useRef(false);
   const syncRetryRequestedRef = useRef(false);
+  const syncQueueRef = useRef(syncQueue);
 
   const setRole = (value) => setRoleState(value);
   const appRole = authUser?.role === "dev" ? role : authUser?.role || role;
-  const roleNavigationGroups = useMemo(() => getNavigationGroups(appRole), [appRole]);
-  const visibleNavigationItems = useMemo(() => roleNavigationGroups.flatMap((group) => group.items), [roleNavigationGroups]);
-  const allowedNav = useMemo(() => getAllowedPages(appRole), [appRole]);
-  const mobilePrimaryItems = useMemo(() => getMobilePrimaryItems(appRole), [appRole]);
-  const canOpenModule = (moduleId) => allowedNav.some((item) => item.id === moduleId);
+  const { activeGroup: activeNavigationGroup, allowedPages: allowedNav, canOpenModule, groups: roleNavigationGroups, items: visibleNavigationItems, mobilePrimaryItems } = useRoleNavigation(appRole, active);
   const navigateTo = (moduleId) => { if (canOpenModule(moduleId)) setActive(moduleId); };
   const openSearchOrder = (orderId) => { setSelectedOrderId(orderId); setActive(appRole === "kunde" ? "portal" : "orders"); };
   const toggleNavigationFavorite = (moduleId) => setNavigationFavorites((current) => {
@@ -473,8 +499,11 @@ export default function App() {
     if (favorites.length >= 5) { setNotice("Es können maximal fünf Schnellzugriffe angeheftet werden."); return favorites; }
     return [...favorites, moduleId];
   });
-  const pendingSyncCount = useMemo(() => syncQueue.filter((item) => item.status !== "synchronisiert").length, [syncQueue]);
-  const pendingSyncVersion = useMemo(() => Math.max(0, ...syncQueue.filter((item) => item.status !== "synchronisiert").map((item) => Number(item.id) || 0)), [syncQueue]);
+  const syncQueueSummary = useMemo(() => getQueueSummary(syncQueue), [syncQueue]);
+  const autoSyncState = useMemo(() => getAutoSyncState(syncQueue), [syncQueue]);
+  const pendingSyncCount = syncQueueSummary.unsynced;
+  const failedSyncCount = syncQueueSummary.failed;
+  const pendingSyncVersion = autoSyncState.version;
   useEffect(() => {
     if (authUser?.role && authUser.role !== "dev" && role !== authUser.role) setRole(authUser.role);
   }, [authUser?.role, role]);
@@ -482,6 +511,7 @@ export default function App() {
   useEffect(() => saveJson("rs-orders", orders), [orders]);
   useEffect(() => saveJson("rs-selected-order", selectedOrderId), [selectedOrderId]);
   useEffect(() => saveJson("rs-checks", checks), [checks]);
+  useEffect(() => saveJson("rs-order-photos", photos), [photos]);
   useEffect(() => saveJson("rs-notes", notes), [notes]);
   useEffect(() => saveJson("rs-saved-reports", savedReports), [savedReports]);
   useEffect(() => saveJson("rs-measurements", measurementValues), [measurementValues]);
@@ -497,6 +527,7 @@ export default function App() {
   useEffect(() => saveJson("rs-pdf-documents", pdfDocuments), [pdfDocuments]);
   useEffect(() => saveJson("rs-module-checks", moduleChecks), [moduleChecks]);
   useEffect(() => saveJson("rs-free-sketch", sketchImage), [sketchImage]);
+  useEffect(() => { syncQueueRef.current = syncQueue; }, [syncQueue]);
 
   const currentPerson = authUser?.personId ? companyPeople.find((p) => p.id === authUser.personId) : null;
   const isCompanyAdmin = ["dev", "meister", "buero"].includes(appRole);
@@ -523,32 +554,53 @@ export default function App() {
   const measurementFields = measurementRequiredFields[selectedProduct.id] || ["Breite", "Höhe", "Untergrund", "Bedienseite", "Foto"];
   const orderMeasurements = measurementValues[selectedOrder?.id] || {};
   const missingMeasurements = measurementFields.filter((field) => !orderMeasurements[field]);
+  const orderPhotos = photos[selectedOrder?.id] || {};
+  const orderPhotoAnalyses = photoAnalyses[selectedOrder?.id] || {};
+  const orderPartRequests = partRequests.filter((request) => request.orderId === selectedOrder?.id);
+  const openOrderPartRequests = orderPartRequests.filter((request) => !["erledigt", "verbaut"].includes(String(request.status || "").toLocaleLowerCase("de-DE")));
+  const orderDocuments = pdfDocuments.filter((document) => document.orderId === selectedOrder?.id);
   const closingValues = manualQuality[selectedOrder?.id] || {};
-  const hasRequiredPhotos = ["Vorher", "Nachher", "Typenschild"].every((key) => photos[key]);
-  const hasPdfProtocol = pdfDocuments.some((document) => document.orderId === selectedOrder?.id);
+  const hasRequiredPhotos = REQUIRED_ORDER_PHOTOS.every((key) => orderPhotos[key]);
+  const hasPdfProtocol = orderDocuments.length > 0;
+  const needsElectricalChecks = !["Gurt", "Kurbel", "manuell"].includes(selectedOrder?.drive);
   const closingGroups = [
-    { id: "work", title: "Arbeiten erledigt", items: [
-      { id: "product-checklist", label: "Produkt-Checkliste vollständig", done: selectedChecklistItems.length > 0 && selectedChecklistItems.every((item) => checks[selectedOrder?.id]?.[item]), required: true, automatic: true, action: "checklists" },
-      { id: "work-area-clean", label: "Arbeitsbereich sauber und vollständig verlassen", done: Boolean(closingValues["work-area-clean"]), required: true },
+    { id: "work", title: "Arbeiten", items: [
+      { id: "work-complete", label: "Arbeiten laut Auftrag erledigt", done: Boolean(closingValues["work-complete"]), required: true },
+      { id: "fixings-checked", label: "Befestigungen kontrolliert", done: Boolean(closingValues["fixings-checked"]), required: true },
+      { id: "clean-installation", label: "Anlage sauber montiert", done: Boolean(closingValues["clean-installation"]), required: true },
+      { id: "work-area-clean", label: "Baustelle gereinigt", done: Boolean(closingValues["work-area-clean"]), required: true },
     ] },
-    { id: "function", title: "Funktion geprüft", items: [
-      { id: "motor", label: "Anlage, Antrieb und Bedienung getestet", done: Boolean(closingValues.motor), required: true },
-      { id: "function-result", label: "Endlagen, Lauf und Bedienung ohne offenen Funktionsfehler", done: Boolean(closingValues["function-result"]), required: true },
+    { id: "function", title: "Funktion", items: [
+      { id: "function-result", label: "Anlage getestet", done: Boolean(closingValues["function-result"]), required: true },
+      ...(needsElectricalChecks ? [
+        { id: "motor", label: "Motor geprüft", done: Boolean(closingValues.motor), required: true },
+        { id: "end-positions", label: "Endlagen geprüft", done: Boolean(closingValues["end-positions"]), required: true },
+        { id: "controls", label: "Bedienung geprüft", done: Boolean(closingValues.controls), required: true },
+        { id: "radio-sensors", label: "Funk/Sensorik geprüft, falls vorhanden", done: Boolean(closingValues["radio-sensors"]), required: String(selectedOrder?.drive || "").toLocaleLowerCase("de-DE").includes("funk") || selectedOrder?.windCritical },
+      ] : []),
     ] },
-    { id: "safety", title: "Sicherheit geprüft", items: [
-      { id: "safety-check", label: "Sicherheitsrelevante Funktionen und Befestigungen geprüft", done: Boolean(closingValues["safety-check"]), required: true },
-      { id: "safety-note", label: "Herstellerhinweise und erkennbare Risiken berücksichtigt", done: Boolean(closingValues["safety-note"]), required: true },
+    { id: "safety", title: "Sicherheit", items: [
+      { id: "safety-check", label: "Sichere Nutzung geprüft", done: Boolean(closingValues["safety-check"]), required: true },
+      { id: "obstacles", label: "Hindernisse und Bewegungsbereich kontrolliert", done: Boolean(closingValues.obstacles), required: true },
+      { id: "safety-fixings", label: "Sicherheitsrelevante Befestigung kontrolliert", done: Boolean(closingValues["safety-fixings"]), required: true },
+      { id: "safety-note", label: "Herstellerhinweise berücksichtigt", done: Boolean(closingValues["safety-note"]), required: true },
     ] },
-    { id: "photos", title: "Fotos vollständig", items: [
+    { id: "photos", title: "Fotos", items: [
       { id: "photos", label: "Vorher-, Nachher- und Typenschildfoto vorhanden", done: hasRequiredPhotos, required: true, automatic: true, action: "photos" },
+      { id: "detail-photos", label: "Relevante Detailfotos geprüft", done: Boolean(closingValues["detail-photos"]), required: true },
     ] },
-    { id: "customer", title: "Kunde eingewiesen", items: [
-      { id: "customer", label: "Bedienung und Besonderheiten erklärt", done: Boolean(closingValues.customer), required: true },
-      { id: "customer-care", label: "Pflege-, Wind- und Nutzungshinweise übergeben", done: Boolean(closingValues["customer-care"]), required: true },
+    { id: "customer", title: "Kunde", items: [
+      { id: "customer", label: "Bedienung erklärt", done: Boolean(closingValues.customer), required: true },
+      { id: "customer-care", label: "Pflege erklärt", done: Boolean(closingValues["customer-care"]), required: true },
+      { id: "customer-safety", label: "Sicherheitshinweise gegeben", done: Boolean(closingValues["customer-safety"]), required: true },
+      { id: "customer-questions", label: "Fragen beantwortet", done: Boolean(closingValues["customer-questions"]), required: true },
     ] },
-    { id: "documents", title: "Dokumente erstellt", items: [
-      { id: "documentation", label: "Arbeitsergebnis und Hinweise im Auftrag dokumentiert", done: Boolean(selectedOrder?.notes?.trim()), required: true, automatic: true, action: "orders" },
+    { id: "documents", title: "Dokumentation", items: [
+      { id: "product-checklist", label: "Produkt-Checkliste vollständig", done: selectedChecklistItems.length > 0 && selectedChecklistItems.every((item) => checks[selectedOrder?.id]?.[item]), required: true, automatic: true, action: "checklists" },
+      { id: "measurement", label: "Aufmaß vollständig", done: missingMeasurements.length === 0, required: true, automatic: true, action: "measurement" },
+      { id: "documentation", label: "Abschlussnotiz vorhanden", done: Boolean(selectedOrder?.completionNote?.trim()), required: true, automatic: true, action: "orders" },
       { id: "pdf-protocol", label: "PDF-Protokoll erstellt", done: hasPdfProtocol, required: false, automatic: true, action: "pdf", recommended: true },
+      { id: "signature-ready", label: "Unterschrift vorbereitet", done: Boolean(closingValues["signature-ready"]), required: false, recommended: true },
     ] },
     { id: "open-points", title: "Offene Punkte", items: [
       { id: "open-points-reviewed", label: "Offene Punkte erfasst oder ausdrücklich als erledigt geprüft", done: Boolean(closingValues["open-points-reviewed"]), required: true },
@@ -563,11 +615,27 @@ export default function App() {
     ...(group.decision?.required && !group.decision.value ? [{ id: group.decision.id, label: group.decision.label, action: "closeOrder" }] : []),
   ]);
   const closeReady = Boolean(selectedOrder) && unresolvedQuality.length === 0;
-  const filteredOrders = visibleOrders.filter((o) => [o.id, o.customer, o.address, o.status, o.priority, o.notes, productTypes.find((p) => p.id === o.product)?.name || "", ...(o.assignedMemberIds || []).map((id) => companyPeople.find((p) => p.id === id)?.name || "")].join(" ").toLowerCase().includes(orderSearch.toLowerCase()));
+  const orderWorkspaceContext = { buildChecklistItems, checks, measurementRequiredFields, measurementValues, photos, requiredPhotos: REQUIRED_ORDER_PHOTOS, partRequests, manualQuality, pdfDocuments };
+  const getOrderOpenItems = (order) => buildOrderOpenItems(order, orderWorkspaceContext);
+  const selectedOrderOpenItems = getOrderOpenItems(selectedOrder);
+  const orderOpenCounts = Object.fromEntries(visibleOrders.map((order) => [order.id, getOrderOpenItems(order).length]));
+  const requiredClosingItems = closingGroups.flatMap((group) => group.items.filter((item) => item.required));
+  const completedClosingItems = requiredClosingItems.filter((item) => item.done).length;
+  const measurementProgress = measurementFields.length ? Math.round(((measurementFields.length - missingMeasurements.length) / measurementFields.length) * 100) : 0;
+  const closingProgress = requiredClosingItems.length ? Math.round((completedClosingItems / requiredClosingItems.length) * 100) : 0;
+  const documentationProgress = Math.round(((hasPdfProtocol ? 1 : 0) + (hasRequiredPhotos ? 1 : 0)) / 2 * 100);
+  const orderProgressItems = [
+    { label: "Vorbereitung", percent: measurementProgress, text: `Aufmaß ${measurementFields.length - missingMeasurements.length}/${measurementFields.length}` },
+    { label: "Durchführung", percent: selectedChecklistProgress, text: `Checkliste ${selectedChecklistDone}/${selectedChecklistItems.length}` },
+    { label: "Abschluss", percent: closingProgress, text: `${completedClosingItems}/${requiredClosingItems.length} Pflichtpunkte` },
+    { label: "Dokumentation", percent: documentationProgress, text: `${hasRequiredPhotos ? "Fotos" : "Fotos offen"} · ${hasPdfProtocol ? "PDF" : "PDF offen"}` },
+  ];
+  const selectedOrderSyncStatus = getOrderSyncStatus(syncQueue, selectedOrder?.id, Boolean(lastSyncedAt));
+  const filteredOrders = visibleOrders.filter((o) => [o.id, o.customer, o.address, o.status, o.priority, o.orderType, o.manufacturer, o.notes, o.internalNotes, o.technicianNote, productTypes.find((p) => p.id === o.product)?.name || "", ...(o.assignedMemberIds || []).map((id) => companyPeople.find((p) => p.id === id)?.name || "")].join(" ").toLowerCase().includes(orderSearch.toLowerCase()));
   const todaysOrders = visibleOrders.filter((o) => o.date === todayIso());
   const openReports = savedReports.filter((r) => r.status !== "Freigegeben");
-  const activeOrders = visibleOrders.filter((o) => !["archiviert", "abgerechnet"].includes(o.status));
-  const waitingPartOrders = visibleOrders.filter((o) => String(o.status || "").toLowerCase().includes("teil"));
+  const activeOrders = visibleOrders.filter((o) => !["Erledigt", "Archiviert"].includes(normalizeOrderStatus(o.status)));
+  const waitingPartOrders = visibleOrders.filter((o) => normalizeOrderStatus(o.status) === "Wartet auf Material");
   const reworkOrders = visibleOrders.filter((o) => String(o.orderType || "").toLowerCase().includes("nacharbeit") || String(o.status || "").toLowerCase().includes("nacharbeit"));
   const roleHome = roleHomeConfig[appRole] || roleHomeConfig.monteur;
   const learningUserId = currentPerson?.id || authUser?.id || "local-azubi";
@@ -598,8 +666,7 @@ export default function App() {
   const selectedWorkflowTemplate = orderWorkflowTemplates.find((t) => t.id === workflowTemplateId) || orderWorkflowTemplates[0];
   const diagnosisCategories = ["all", ...new Set(allDiagnosisTrees.map((d) => d.category))];
   const filteredDiagnosisTrees = allDiagnosisTrees.filter((d) => (diagnosisCategory === "all" || d.category === diagnosisCategory) && [d.title, d.category, d.start.q, d.start.yes, d.start.no, ...(d.tools || []), ...(d.firstSteps || []), ...(d.productIds || [])].join(" ").toLowerCase().includes(diagnosisQuery.toLowerCase()));
-  const filteredParts = allPartCatalog.filter((p) => (partGroup === "all" || p.group === partGroup) && [p.name, p.group, p.product, ...p.asks].join(" ").toLowerCase().includes(partQuery.toLowerCase()));
-  const filteredMakers = allManufacturers.filter((m) => [m.name, ...m.protocols, ...m.topics, ...(m.productIds || []), m.note].join(" ").toLowerCase().includes(manufacturerQuery.toLowerCase()));
+  const filteredMakers = allManufacturers.filter((m) => [m.name, ...(m.categories || []), ...(m.typicalProducts || []), ...(m.motors || []), ...(m.controls || []), ...(m.protocols || []), ...(m.sensors || []), ...(m.smartHome || []), ...(m.partCategories || []), ...(m.topics || []), ...(m.productIds || []), m.note].join(" ").toLowerCase().includes(manufacturerQuery.toLowerCase()));
   const net = Number(calc.count) * Number(calc.material) + Number(calc.labor) * Number(calc.rate) + Number(calc.travel) + Number(calc.wdvs) + Number(calc.disposal);
   const selectedReportTemplate = reportActivityTemplates.find((template) => template.id === reportTemplateId) || reportActivityTemplates[0];
   const reportCheckedItems = selectedChecklistItems.filter((item) => checks[selectedOrder?.id]?.[item]);
@@ -627,6 +694,7 @@ export default function App() {
   const partRequestOrder = orders.find((order) => order.id === partRequest.orderId) || selectedOrder;
   const partPhotoScope = `ersatzteil-anfrage-${partRequest.draftKey || partRequest.id || partRequestOrder?.id || "neu"}`;
   const partPhotoChecks = moduleChecks[partPhotoScope] || {};
+  const partPhotoRequirements = getPartPhotoRequirements(partRequest.product || partRequestOrder?.product);
   const partRequestText = buildPartRequestText(partRequest, partRequestOrder, partPhotoChecks);
   const customerTemplateForOrder = (text) => text.replaceAll("{kunde}", selectedOrder?.customer || "Kunde").replaceAll("{produkt}", selectedProduct.name).replaceAll("{termin}", `${selectedOrder?.date || "Termin"} ${selectedOrder?.time || ""}`.trim()).replaceAll("{adresse}", selectedOrder?.address || "Adresse");
   const currentPdfTemplate = pdfTemplateDefinitions[pdfTarget] || pdfTemplateDefinitions["Montageprotokoll"];
@@ -704,8 +772,18 @@ export default function App() {
     "Monteur/Vorarbeiter: _______________________________",
     "Kunde/Auftraggeber: _______________________________",
   ]);
-  const savePdfDocument = () => { const doc = { id: `PDF-${Date.now()}`, orderId: selectedOrder?.id || "", customer: selectedOrder?.customer || "", template: pdfTarget, status: "erstellt", fileName: pdfFileName, createdAt: new Date().toLocaleString("de-DE"), text: pdfPreviewLines }; setPdfDocuments((docs) => [doc, ...docs]); addToSyncQueue("PDF-Dokument gespeichert", { orderId: selectedOrder?.id, template: pdfTarget }); showNotice("PDF-Dokument wurde dem Auftrag zugeordnet."); };
-  const updatePdfDocumentStatus = (id, status) => setPdfDocuments((docs) => docs.map((doc) => doc.id === id ? { ...doc, status } : doc));
+  const appendOrderEvent = (orderId, note, status = "") => {
+    if (!orderId) return;
+    const at = new Date().toLocaleString("de-DE");
+    setOrders((list) => list.map((order) => order.id === orderId ? { ...order, updatedAt: at, statusHistory: [...(order.statusHistory || []), { status: status || order.status, at, by: authUser?.name || "System", note }] } : order));
+  };
+  const savePdfDocument = () => { const doc = { id: `PDF-${Date.now()}`, orderId: selectedOrder?.id || "", customer: selectedOrder?.customer || "", template: pdfTarget, status: "Erstellt", fileName: pdfFileName, createdAt: new Date().toLocaleString("de-DE"), text: pdfPreviewLines }; setPdfDocuments((docs) => [doc, ...docs]); addToSyncQueue("PDF-Dokument gespeichert", { orderId: selectedOrder?.id, template: pdfTarget }); appendOrderEvent(selectedOrder?.id, `${pdfTarget} erstellt`); showNotice("PDF-Dokument wurde dem Auftrag zugeordnet."); };
+  const updatePdfDocumentStatus = (id, status) => {
+    setPdfDocuments((docs) => docs.map((doc) => doc.id === id ? { ...doc, status } : doc));
+    addToSyncQueue("PDF-Dokumentstatus geändert", { recordId: id, status }, { type: "pdfMetadata", recordId: id });
+    const document = pdfDocuments.find((item) => item.id === id);
+    appendOrderEvent(document?.orderId, `Dokumentstatus auf ${status} gesetzt`);
+  };
   const updateOrderById = (orderId, changes) => setOrders((list) => list.map((order) => order.id === orderId ? { ...order, ...changes, updatedAt: new Date().toLocaleString("de-DE") } : order));
   const openCustomerOrder = (order) => { setSelectedOrderId(order.id); showNotice(`Auftrag ${order.id} geöffnet.`); if (appRole !== "kunde") setActive("orders"); };
   const confirmCustomerAppointment = (order) => {
@@ -720,23 +798,33 @@ export default function App() {
     showNotice(`Termin für Auftrag ${order.id} wurde bestätigt.`);
   };
   const showNotice = (message) => { setNotice(message); setTimeout(() => setNotice(""), 1600); };
-  const addToSyncQueue = (action, payload = {}) => setSyncQueue((queue) => enqueueSyncItem(queue, action, payload, offline));
-  const queueLocalChange = () => setSyncQueue((queue) => replaceLocalChange(queue, offline));
-  const ensureSyncRetryQueued = (message) => setSyncQueue((queue) => ensureRetryQueued(queue, message, offline));
-  const markQueueSynced = (throughId) => setSyncQueue((queue) => markQueueItemsSynced(queue, throughId));
+  const updateSyncQueue = (updater) => setSyncQueue((queue) => {
+    const next = updater(queue);
+    syncQueueRef.current = next;
+    return next;
+  });
+  const addToSyncQueue = (action, data = {}, options = {}) => updateSyncQueue((queue) => enqueueSyncItem(queue, action, data, offline, options));
+  const queueLocalChange = () => updateSyncQueue((queue) => replaceLocalChange(queue, offline, { ownerId: authUser?.id || "local", orderId: selectedOrder?.id || "" }));
+  const ensureSyncRetryQueued = (message) => updateSyncQueue((queue) => ensureRetryQueued(queue, message, offline));
+  const markQueueSynced = (identifiers) => updateSyncQueue((queue) => markQueueItemsSynced(queue, identifiers));
+  const retrySync = () => {
+    updateSyncQueue(retryFailedQueue);
+    setSyncError("");
+    showNotice(offline ? "Erneuter Sync vorgemerkt. Die App bleibt lokal nutzbar." : "Synchronisierung wird erneut versucht.");
+  };
   const savePartRequestDraft = () => {
     const requestId = partRequest.id || `ET-${Date.now()}`;
     const existing = partRequests.find((request) => request.id === requestId);
-    const photoChecklist = Object.fromEntries(PART_PHOTO_REQUIREMENTS.map((item) => [item, Boolean(partPhotoChecks[item])]));
+    const photoChecklist = Object.fromEntries(partPhotoRequirements.map((item) => [item, Boolean(partPhotoChecks[item])]));
     const request = {
       ...partRequest,
       id: requestId,
       draftKey: partRequest.draftKey || requestId,
       orderId: partRequest.orderId || partRequestOrder?.id || "",
       customer: partRequest.customer || partRequestOrder?.customer || "",
-      status: partRequest.status || "offen",
+      status: partRequest.status || "Entwurf",
       photoChecklist,
-      photoComplete: PART_PHOTO_REQUIREMENTS.every((item) => photoChecklist[item]),
+      photoComplete: partPhotoRequirements.every((item) => photoChecklist[item]),
       requestText: buildPartRequestText(partRequest, partRequestOrder, photoChecklist),
       createdAt: existing?.createdAt || new Date().toLocaleString("de-DE"),
       updatedAt: new Date().toLocaleString("de-DE"),
@@ -744,27 +832,33 @@ export default function App() {
     setPartRequests((requests) => existing ? requests.map((item) => item.id === requestId ? request : item) : [request, ...requests]);
     setPartRequest(request);
     addToSyncQueue("Ersatzteil-Anfrage als Entwurf gespeichert", { requestId, orderId: request.orderId });
+    appendOrderEvent(request.orderId, `Ersatzteil-Anfrage ${requestId} als Entwurf gespeichert`);
     showNotice("Ersatzteil-Anfrage wurde lokal als Entwurf gespeichert.");
   };
   const loadPartRequestDraft = (request) => {
     setPartRequest({ ...createEmptyPartRequest(), ...request, draftKey: request.draftKey || request.id });
+    setPartMode("request");
     if (request.orderId && orders.some((order) => order.id === request.orderId)) setSelectedOrderId(request.orderId);
     showNotice(`Entwurf ${request.id} wurde geladen.`);
   };
   const newPartRequestDraft = () => {
     setPartRequest(createEmptyPartRequest(selectedOrder));
+    setPartMode("request");
     showNotice("Neue Ersatzteil-Anfrage vorbereitet.");
   };
   const updatePartRequestStatus = (requestId, status) => {
     setPartRequests((requests) => requests.map((request) => request.id === requestId ? { ...request, status, updatedAt: new Date().toLocaleString("de-DE") } : request));
     setPartRequest((request) => request.id === requestId ? { ...request, status } : request);
     addToSyncQueue("Ersatzteil-Status geändert", { requestId, status });
+    const request = partRequests.find((item) => item.id === requestId);
+    appendOrderEvent(request?.orderId, `Ersatzteil-Status auf ${status} gesetzt`);
     showNotice(`Status auf „${status}“ gesetzt. Es wurde keine E-Mail versendet.`);
   };
   const saveSketchRecord = (sketch) => {
     setSavedSketches((current) => [sketch, ...(Array.isArray(current) ? current : [])].slice(0, 30));
     setSketchImage(sketch.image);
     addToSyncQueue("Skizze gespeichert", { sketchId: sketch.id, orderId: sketch.orderId || "" });
+    appendOrderEvent(sketch.orderId, `Skizze ${sketch.title || sketch.useCase || sketch.id} gespeichert`);
     showNotice("Skizze wurde lokal gespeichert.");
   };
   const deleteSketchRecord = (sketch) => {
@@ -826,6 +920,7 @@ export default function App() {
     if (snapshot.savedReports) setSavedReports(snapshot.savedReports);
     if (snapshot.measurementValues) setMeasurementValues(snapshot.measurementValues);
     if (snapshot.manualQuality) setManualQuality(snapshot.manualQuality);
+    if (snapshot.photos && typeof snapshot.photos === "object") setPhotos(snapshot.photos);
     if (snapshot.photoAnalyses) setPhotoAnalyses(snapshot.photoAnalyses);
     if (snapshot.pdfDocuments) setPdfDocuments(snapshot.pdfDocuments);
     if (snapshot.moduleChecks) setModuleChecks(snapshot.moduleChecks);
@@ -833,6 +928,10 @@ export default function App() {
     if (snapshot.learningProgress && typeof snapshot.learningProgress === "object") setLearningProgress(snapshot.learningProgress);
     if (typeof snapshot.sketchImage === "string") setSketchImage(snapshot.sketchImage);
     if (Array.isArray(snapshot.savedSketches)) setSavedSketches(snapshot.savedSketches);
+    if (Array.isArray(snapshot.manufacturerFavorites)) setManufacturerFavorites(snapshot.manufacturerFavorites);
+    if (Array.isArray(snapshot.motorFavorites)) setMotorFavorites(snapshot.motorFavorites);
+    if (Array.isArray(snapshot.technicalRecents)) setTechnicalRecents(snapshot.technicalRecents);
+    if (snapshot.technicalNotes && typeof snapshot.technicalNotes === "object") setTechnicalNotes(snapshot.technicalNotes);
     if (snapshot.orders?.[0]?.id) setSelectedOrderId(snapshot.orders[0].id);
   };
   const saveAppToSupabase = async (overrideCompany = null, options = {}) => {
@@ -845,43 +944,48 @@ export default function App() {
       syncRetryRequestedRef.current = true;
       return false;
     }
-    const syncStartedAt = Date.now();
+    const currentQueue = syncQueueRef.current;
+    const syncItems = getSyncableQueueItems(currentQueue, { includeFailed: Boolean(options.force) });
+    const syncItemIds = syncItems.map((item) => item.id);
+    if (!syncItemIds.length && !overrideCompany && !options.forceSnapshot) return true;
+
+    if (syncItemIds.length) updateSyncQueue((queue) => markQueueSyncing(queue, syncItemIds));
     syncInFlightRef.current = true;
+    setSyncing(true);
     try {
       const activeCompany = overrideCompany || company;
       const snapshot = { ...createSnapshot(), company: activeCompany, companyPeople, orders, savedAt: new Date().toISOString() };
-      await withTimeout((async () => {
-        const { data: authData, error: authError } = await supabase.auth.getUser();
-        if (authError) throw authError;
-        if (!authData?.user) throw new Error("Bitte zuerst mit E-Mail oder persönlichem Code anmelden.");
-        const { error: companyError } = await supabase.from("companies").upsert(companyToRow(activeCompany, authData.user.id));
-        if (companyError) throw companyError;
-        if (companyPeople.length) {
-          const { error: peopleError } = await supabase.from("company_people").upsert(companyPeople.map((person) => personToRow(person, activeCompany.id)));
-          if (peopleError) throw peopleError;
-        }
-        if (orders.length) {
-          const { error: ordersError } = await supabase.from("orders").upsert(orders.map((order) => ({ id: order.id, company_id: activeCompany.id, data: order, updated_at: new Date().toISOString() })));
-          if (ordersError) throw ordersError;
-        }
-        const { error: snapshotError } = await supabase.from("app_snapshots").upsert({ company_id: activeCompany.id, snapshot, updated_by: authData.user.id, updated_at: new Date().toISOString() });
-        if (snapshotError) throw snapshotError;
-      })());
+      const timestamp = new Date().toISOString();
+      const deletedOrderIds = syncItems
+        .filter((item) => item.type === "order" && item.action.toLocaleLowerCase("de-DE").includes("gelöscht"))
+        .map((item) => item.recordId)
+        .filter(Boolean);
+
+      await saveCompanySnapshot({
+        client: supabase,
+        companyRow: companyToRow(activeCompany),
+        peopleRows: companyPeople.map((person) => personToRow(person, activeCompany.id)),
+        orderRows: orders.map((order) => ({ id: order.id, company_id: activeCompany.id, data: order, updated_at: timestamp })),
+        deletedOrderIds,
+        snapshotRow: { company_id: activeCompany.id, snapshot, updated_at: timestamp },
+      });
       const syncedAt = new Date().toISOString();
       setLastSyncedAt(syncedAt);
       setSyncError("");
       addSyncLog(options.quiet ? "Auto-Sync gespeichert" : "Supabase gespeichert");
-      markQueueSynced(syncStartedAt);
+      if (syncItemIds.length) markQueueSynced(syncItemIds);
       if (!options.quiet) setBackendMessage("Daten wurden in Supabase gespeichert.");
       return true;
     } catch (error) {
       addSyncLog(`Supabase Fehler: ${error.message}`, "fehler");
       setSyncError(error.message || "Cloud-Sync fehlgeschlagen.");
-      ensureSyncRetryQueued(error.message || "Cloud-Sync fehlgeschlagen");
-      if (!options.quiet) setBackendMessage("Sync fehlgeschlagen. Die App arbeitet lokal weiter.");
+      if (syncItemIds.length) updateSyncQueue((queue) => markQueueFailed(queue, syncItemIds, error.message));
+      else ensureSyncRetryQueued(error.message || "Cloud-Sync fehlgeschlagen");
+      if (!options.quiet) setBackendMessage("Änderungen wurden lokal gespeichert und später synchronisiert.");
       return false;
     } finally {
       syncInFlightRef.current = false;
+      setSyncing(false);
       if (syncRetryRequestedRef.current && !offline) {
         syncRetryRequestedRef.current = false;
         window.setTimeout(() => saveAppToSupabase(null, { quiet: true }), 500);
@@ -892,6 +996,7 @@ export default function App() {
     if (!requireSupabase()) return false;
     try {
       const isCustomerAccount = targetRole === "kunde";
+      const preserveLocalChanges = !isCustomerAccount && getQueueSummary(syncQueueRef.current).unsynced > 0;
       const { snap, portalData, portalErrorMessage, remotePeople, remoteOrders } = await withTimeout((async () => {
         let snap = null;
         let portalData = null;
@@ -925,12 +1030,14 @@ export default function App() {
             : remoteOrder;
         }));
         setPdfDocuments(Array.isArray(portalData?.pdfDocuments) ? portalData.pdfDocuments : []);
-      } else {
+      } else if (!preserveLocalChanges) {
         if (snap?.snapshot) applyRemoteSnapshot(snap.snapshot);
         if (remotePeople?.length) setCompanyPeople(remotePeople.map(rowToPerson));
         if (remoteOrders?.length) setOrders(remoteOrders.map((row) => row.data));
+      } else {
+        addSyncLog("Lokale Änderungen vor Cloud-Stand priorisiert");
       }
-      setLastSyncedAt(new Date().toISOString());
+      if (!preserveLocalChanges) setLastSyncedAt(new Date().toISOString());
       setSyncError(portalErrorMessage ? "Kundenportal konnte nicht sicher aus der Cloud geladen werden. Supabase-Schema aktualisieren." : "");
       addSyncLog("Supabase geladen");
       return true;
@@ -1182,50 +1289,114 @@ export default function App() {
     const currentIds = selectedOrder.assignedMemberIds || [];
     const nextIds = currentIds.includes(personId) ? currentIds.filter((id) => id !== personId) : [...currentIds, personId];
     const names = nextIds.map((id) => companyPeople.find((p) => p.id === id)?.name).filter(Boolean).join(", ");
-    updateSelectedOrder({ assignedMemberIds: nextIds, assignedTo: names });
+    const person = companyPeople.find((item) => item.id === personId);
+    updateSelectedOrder({ assignedMemberIds: nextIds, assignedTo: names }, { immediate: true, action: "Teamzuweisung geändert" });
+    appendOrderEvent(selectedOrder.id, `${person?.name || "Teammitglied"} ${nextIds.includes(personId) ? "zugewiesen" : "aus der Zuweisung entfernt"}`);
   };
   const assignCustomerToOrder = (personId) => {
     const customer = companyPeople.find((p) => p.id === personId);
     if (!selectedOrder || !customer) return;
-    updateSelectedOrder({ customerPersonId: customer.id, customer: customer.name, address: customer.address || selectedOrder.address, phone: customer.phone || selectedOrder.phone });
+    updateSelectedOrder({ customerPersonId: customer.id, customer: customer.name, address: customer.address || selectedOrder.address, phone: customer.phone || selectedOrder.phone }, { immediate: true, action: "Kunde verknüpft" });
+    appendOrderEvent(selectedOrder.id, `Kunde ${customer.name} verknüpft`);
   };
-  const updateAzubiProgress = (personId, progress) => setCompanyPeople((list) => list.map((p) => p.id === personId ? { ...p, progress: Number(progress) } : p));
+  const updateAzubiProgress = (personId, progress) => {
+    setCompanyPeople((list) => list.map((p) => p.id === personId ? { ...p, progress: Number(progress) } : p));
+    addToSyncQueue("Lernfortschritt geändert", { learnerId: personId, progress: Number(progress) });
+  };
 
-  const addOrder = (openChecklist = false) => { if (!newOrder.customer.trim()) { showNotice("Bitte mindestens einen Kundennamen eintragen."); return; } const id = `A-${Math.floor(1000 + Math.random() * 9000)}`; const stamp = new Date().toLocaleString("de-DE"); const order = { id, status: "offen", createdAt: stamp, updatedAt: stamp, statusHistory: [{ status: "offen", at: stamp, by: authUser?.name || "System", note: "Auftrag angelegt" }], ...newOrder }; setOrders((list) => [order, ...list]); setSelectedOrderId(id); setChecks((current) => ({ ...current, [id]: buildEmptyChecklist(newOrder.product, newOrder) })); addToSyncQueue("Auftrag angelegt", { orderId: id }); setNewOrder({ customer: "", contact: "", phone: "", email: "", address: "", date: todayIso(), time: "08:00", assignedTo: "", product: "vorbaurollladen", substrate: "Beton", drive: "Funkmotor", installType: "Renovierung", windCritical: false, priority: "normal", orderType: "Montage", notes: "" }); showNotice("Auftrag wurde gespeichert."); if (openChecklist) setActive("checklists"); };
-  const updateSelectedOrder = (changes) => { if (!selectedOrder) return; setOrders((list) => list.map((order) => order.id === selectedOrder.id ? { ...order, ...changes, updatedAt: new Date().toLocaleString("de-DE") } : order)); addToSyncQueue("Auftrag geändert", { orderId: selectedOrder.id, changes: Object.keys(changes) }); showNotice("Änderung gespeichert."); };
+  const addOrder = (openChecklist = false) => { if (!newOrder.customer.trim()) { showNotice("Bitte mindestens einen Kundennamen eintragen."); return; } const id = `A-${Math.floor(1000 + Math.random() * 9000)}`; const stamp = new Date().toLocaleString("de-DE"); const order = { id, status: "Neu", createdAt: stamp, updatedAt: stamp, statusHistory: [{ status: "Neu", at: stamp, by: authUser?.name || "System", note: "Auftrag erstellt" }], ...newOrder, internalNotes: newOrder.notes || "" }; setOrders((list) => [order, ...list]); setSelectedOrderId(id); setChecks((current) => ({ ...current, [id]: buildEmptyChecklist(newOrder.product, newOrder) })); addToSyncQueue("Auftrag angelegt", { orderId: id }); setNewOrder({ customer: "", contact: "", phone: "", email: "", address: "", date: todayIso(), time: "08:00", assignedTo: "", product: "vorbaurollladen", substrate: "Beton", drive: "Funkmotor", installType: "Renovierung", windCritical: false, priority: "normal", orderType: "Montage", notes: "" }); showNotice("Auftrag wurde gespeichert und als Baustellenakte geöffnet."); if (openChecklist) setActive("checklists"); else setActive("orders"); };
+  const updateSelectedOrder = (changes, options = {}) => { if (!selectedOrder) return; setOrders((list) => list.map((order) => order.id === selectedOrder.id ? { ...order, ...changes, updatedAt: new Date().toLocaleString("de-DE") } : order)); if (options.immediate) addToSyncQueue(options.action || "Auftrag geändert", { orderId: selectedOrder.id, changes: Object.keys(changes) }, { immediate: true }); };
   const updateSelectedOrderStatus = (status, note = "Status geändert") => { if (!selectedOrder) return; const stamp = new Date().toLocaleString("de-DE"); setOrders((list) => list.map((order) => order.id === selectedOrder.id ? { ...order, status, updatedAt: stamp, statusHistory: [...(order.statusHistory || []), { status, at: stamp, by: authUser?.name || "System", note }] } : order)); addToSyncQueue("Status geändert", { orderId: selectedOrder.id, status }); showNotice(`Status geändert: ${status}`); };
   const updateSelectedOrderProduct = (productId) => { if (!selectedOrder) return; setOrders((list) => list.map((order) => order.id === selectedOrder.id ? { ...order, product: productId, updatedAt: new Date().toLocaleString("de-DE") } : order)); setChecks((current) => ({ ...current, [selectedOrder.id]: buildEmptyChecklist(productId, { ...selectedOrder, product: productId }) })); addToSyncQueue("Produkt/Checkliste geändert", { orderId: selectedOrder.id, productId }); showNotice("Produkt geändert und passende Checkliste neu geladen."); };
   const deleteSelectedOrder = () => { if (!selectedOrder) return; const remaining = orders.filter((order) => order.id !== selectedOrder.id); setOrders(remaining); setChecks((current) => { const next = { ...current }; delete next[selectedOrder.id]; return next; }); setSelectedOrderId(remaining[0]?.id || ""); addToSyncQueue("Auftrag gelöscht", { orderId: selectedOrder.id }); showNotice("Auftrag gelöscht."); };
-  const duplicateSelectedOrder = () => { if (!selectedOrder) return; const id = `A-${Math.floor(1000 + Math.random() * 9000)}`; const stamp = new Date().toLocaleString("de-DE"); const copy = { ...selectedOrder, id, status: "offen", createdAt: stamp, updatedAt: stamp, notes: `${selectedOrder.notes || ""}
-Kopie/Nachfolgeauftrag aus ${selectedOrder.id}`.trim(), statusHistory: [{ status: "offen", at: stamp, by: authUser?.name || "System", note: `Dupliziert aus ${selectedOrder.id}` }] }; setOrders((list) => [copy, ...list]); setSelectedOrderId(id); setChecks((current) => ({ ...current, [id]: buildEmptyChecklist(copy.product, copy) })); addToSyncQueue("Auftrag dupliziert", { from: selectedOrder.id, to: id }); showNotice("Auftrag wurde dupliziert."); };
-  const archiveSelectedOrder = () => updateSelectedOrderStatus("archiviert", "Auftrag archiviert");
-  const createReworkOrder = (options = {}) => { if (!selectedOrder) return; const sourceOrder = selectedOrder; const id = `A-${Math.floor(1000 + Math.random() * 9000)}`; const stamp = new Date().toLocaleString("de-DE"); const rework = { ...sourceOrder, id, parentOrderId: sourceOrder.id, reworkOrderId: "", status: "offen", priority: "dringend", orderType: "Nacharbeit", createdAt: stamp, updatedAt: stamp, notes: `Nacharbeit zu ${sourceOrder.id}: offene Punkte prüfen, Fotos ergänzen und Kunden informieren.`, statusHistory: [{ status: "offen", at: stamp, by: authUser?.name || "System", note: `Nacharbeit aus ${sourceOrder.id} erstellt` }] }; setOrders((list) => [rework, ...list.map((order) => order.id === sourceOrder.id ? { ...order, reworkOrderId: id, updatedAt: stamp, statusHistory: [...(order.statusHistory || []), { status: order.status, at: stamp, by: authUser?.name || "System", note: `Nacharbeitsauftrag ${id} angelegt` }] } : order)]); if (!options.keepSourceSelected) setSelectedOrderId(id); setChecks((current) => ({ ...current, [id]: buildEmptyChecklist(rework.product, rework) })); addToSyncQueue("Nacharbeit erstellt", { from: sourceOrder.id, to: id }); showNotice(`Nacharbeitsauftrag ${id} wurde angelegt.`); };
-  const startPartRequestForSelectedOrder = () => { if (!selectedOrder) return; const stamp = new Date().toLocaleString("de-DE"); setPartRequest(createEmptyPartRequest(selectedOrder)); setOrders((list) => list.map((order) => order.id === selectedOrder.id ? { ...order, partRequestStartedAt: stamp, updatedAt: stamp } : order)); addToSyncQueue("Ersatzteil-Anfrage gestartet", { orderId: selectedOrder.id }); setActive("parts"); showNotice("Ersatzteil-Anfrage für den Auftrag wurde vorbereitet."); };
-  const createOrderFromWorkflowTemplate = () => { const t = selectedWorkflowTemplate; const id = `A-${Math.floor(1000 + Math.random() * 9000)}`; const stamp = new Date().toLocaleString("de-DE"); const order = { id, customer: "Neuer Kunde", contact: "", phone: "", email: "", address: "", date: todayIso(), time: "08:00", assignedTo: "", product: t.product, substrate: "Beton", drive: "Funkmotor", installType: "Renovierung", windCritical: false, status: "offen", priority: "normal", orderType: t.orderType, notes: t.notes, createdAt: stamp, updatedAt: stamp, statusHistory: [{ status: "offen", at: stamp, by: authUser?.name || "System", note: `Aus Vorlage ${t.name} erstellt` }] }; setOrders((list) => [order, ...list]); setSelectedOrderId(id); setChecks((current) => ({ ...current, [id]: buildEmptyChecklist(order.product, order) })); setActive("orders"); addToSyncQueue("Auftrag aus Vorlage erstellt", { template: t.id, orderId: id }); showNotice(`Vorlage erstellt: ${t.name}`); };
+  const duplicateSelectedOrder = () => { if (!selectedOrder) return; const id = `A-${Math.floor(1000 + Math.random() * 9000)}`; const stamp = new Date().toLocaleString("de-DE"); const copy = { ...selectedOrder, id, status: "Neu", createdAt: stamp, updatedAt: stamp, notes: `${selectedOrder.notes || ""}
+Kopie/Nachfolgeauftrag aus ${selectedOrder.id}`.trim(), statusHistory: [{ status: "Neu", at: stamp, by: authUser?.name || "System", note: `Dupliziert aus ${selectedOrder.id}` }] }; setOrders((list) => [copy, ...list]); setSelectedOrderId(id); setChecks((current) => ({ ...current, [id]: buildEmptyChecklist(copy.product, copy) })); addToSyncQueue("Auftrag dupliziert", { from: selectedOrder.id, to: id }); showNotice("Auftrag wurde dupliziert."); };
+  const archiveSelectedOrder = () => updateSelectedOrderStatus("Archiviert", "Auftrag archiviert");
+  const createReworkOrder = (options = {}) => { if (!selectedOrder) return; const sourceOrder = selectedOrder; const id = `A-${Math.floor(1000 + Math.random() * 9000)}`; const stamp = new Date().toLocaleString("de-DE"); const rework = { ...sourceOrder, id, parentOrderId: sourceOrder.id, reworkOrderId: "", status: "Nacharbeit", priority: "dringend", orderType: "Nacharbeit", createdAt: stamp, updatedAt: stamp, notes: `Nacharbeit zu ${sourceOrder.id}: offene Punkte prüfen, Fotos ergänzen und Kunden informieren.`, internalNotes: `Nacharbeit zu ${sourceOrder.id}: offene Punkte prüfen, Fotos ergänzen und Kunden informieren.`, statusHistory: [{ status: "Nacharbeit", at: stamp, by: authUser?.name || "System", note: `Nacharbeit aus ${sourceOrder.id} erstellt` }] }; setOrders((list) => [rework, ...list.map((order) => order.id === sourceOrder.id ? { ...order, reworkOrderId: id, updatedAt: stamp, statusHistory: [...(order.statusHistory || []), { status: order.status, at: stamp, by: authUser?.name || "System", note: `Nacharbeitsauftrag ${id} angelegt` }] } : order)]); setPhotos((current) => ({ ...current, [id]: Object.fromEntries(Object.entries(current[sourceOrder.id] || {}).map(([category, photo]) => [category, { ...photo, id: `PHOTO-${Date.now()}-${category}`, orderId: id, createdAt: stamp }])) })); if (!options.keepSourceSelected) setSelectedOrderId(id); setChecks((current) => ({ ...current, [id]: buildEmptyChecklist(rework.product, rework) })); addToSyncQueue("Nacharbeit erstellt", { from: sourceOrder.id, to: id }); showNotice(`Nacharbeitsauftrag ${id} wurde angelegt.`); };
+  const startPartRequestForSelectedOrder = (navigate = true) => { if (!selectedOrder) return; const stamp = new Date().toLocaleString("de-DE"); setPartRequest(createEmptyPartRequest(selectedOrder)); setPartMode("request"); setOrders((list) => list.map((order) => order.id === selectedOrder.id ? { ...order, partRequestStartedAt: stamp, updatedAt: stamp, statusHistory: [...(order.statusHistory || []), { status: order.status, at: stamp, by: authUser?.name || "System", note: "Ersatzteil-Anfrage vorbereitet" }] } : order)); addToSyncQueue("Ersatzteil-Anfrage gestartet", { orderId: selectedOrder.id }); if (navigate) setActive("parts"); showNotice("Ersatzteil-Anfrage für den Auftrag wurde vorbereitet."); };
+  const createOrderFromWorkflowTemplate = () => { const t = selectedWorkflowTemplate; const id = `A-${Math.floor(1000 + Math.random() * 9000)}`; const stamp = new Date().toLocaleString("de-DE"); const order = { id, customer: "Neuer Kunde", contact: "", phone: "", email: "", address: "", date: todayIso(), time: "08:00", assignedTo: "", product: t.product, substrate: "Beton", drive: "Funkmotor", installType: "Renovierung", windCritical: false, status: "Neu", priority: "normal", orderType: t.orderType, notes: t.notes, internalNotes: t.notes, createdAt: stamp, updatedAt: stamp, statusHistory: [{ status: "Neu", at: stamp, by: authUser?.name || "System", note: `Aus Vorlage ${t.name} erstellt` }] }; setOrders((list) => [order, ...list]); setSelectedOrderId(id); setChecks((current) => ({ ...current, [id]: buildEmptyChecklist(order.product, order) })); setActive("orders"); addToSyncQueue("Auftrag aus Vorlage erstellt", { template: t.id, orderId: id }); showNotice(`Vorlage erstellt: ${t.name}`); };
   const toggleCheck = (orderId, item) => { setChecks((current) => ({ ...current, [orderId]: { ...(current[orderId] || {}), [item]: !(current[orderId]?.[item]) } })); addToSyncQueue("Checkliste geändert", { orderId, item }); };
-  const setMeasurementField = (field, value) => { setMeasurementValues((current) => ({ ...current, [selectedOrder?.id]: { ...(current[selectedOrder?.id] || {}), [field]: value } })); addToSyncQueue("Aufmaß geändert", { orderId: selectedOrder?.id, field }); };
-  const uploadPhoto = (id, file) => { if (!file) return; setPhotos((p) => ({ ...p, [id]: { name: file.name, url: URL.createObjectURL(file) } })); addToSyncQueue("Foto hinzugefügt", { orderId: selectedOrder?.id, photoType: id, fileName: file.name }); };
+  const setMeasurementField = (field, value) => { setMeasurementValues((current) => ({ ...current, [selectedOrder?.id]: { ...(current[selectedOrder?.id] || {}), [field]: value } })); };
+  const uploadPhoto = (category, file) => { if (!file || !selectedOrder) return; const reader = new FileReader(); reader.onload = () => { const record = { id: `PHOTO-${Date.now()}`, orderId: selectedOrder.id, category, name: file.name, url: String(reader.result || ""), note: "", createdAt: new Date().toLocaleString("de-DE"), required: REQUIRED_ORDER_PHOTOS.includes(category) }; setPhotos((current) => ({ ...current, [selectedOrder.id]: { ...(current[selectedOrder.id] || {}), [category]: record } })); addToSyncQueue("Foto hinzugefügt", { orderId: selectedOrder.id, photoType: category, fileName: file.name }); appendOrderEvent(selectedOrder.id, `${category}-Foto hinzugefügt`); }; reader.onerror = () => showNotice("Foto konnte nicht lokal gelesen werden."); reader.readAsDataURL(file); };
+  const updatePhotoNote = (category, note) => { if (!selectedOrder) return; setPhotos((current) => ({ ...current, [selectedOrder.id]: { ...(current[selectedOrder.id] || {}), [category]: { ...(current[selectedOrder.id]?.[category] || {}), note } } })); };
   const toggleQuality = (id) => { if (!selectedOrder) return; setManualQuality((current) => ({ ...current, [selectedOrder.id]: { ...(current[selectedOrder.id] || {}), [id]: !current[selectedOrder.id]?.[id] } })); addToSyncQueue("Abschlussprüfung geändert", { orderId: selectedOrder.id, id }); };
   const setQualityValue = (id, value) => { if (!selectedOrder) return; setManualQuality((current) => ({ ...current, [selectedOrder.id]: { ...(current[selectedOrder.id] || {}), [id]: value } })); addToSyncQueue("Abschlussentscheidung geändert", { orderId: selectedOrder.id, id, value }); };
-  const completeSelectedOrder = () => { if (!selectedOrder) return; if (!closeReady) { showNotice(`${unresolvedQuality.length} Pflichtpunkt${unresolvedQuality.length === 1 ? " fehlt" : "e fehlen"}.`); return; } updateSelectedOrderStatus("erledigt", "Abschlussprüfung vollständig"); };
+  const completeSelectedOrder = () => { if (!selectedOrder) return; if (!closeReady) { showNotice(`${unresolvedQuality.length} Pflichtpunkt${unresolvedQuality.length === 1 ? " fehlt" : "e fehlen"}.`); return; } updateSelectedOrderStatus("Erledigt", "Abschlussprüfung vollständig"); };
   const applyReportTemplate = () => { setReportText(selectedReportTemplate.text); showNotice("Vorlage wurde übernommen."); };
   const importChecklistIntoReport = () => { const text = reportCheckedItems.length ? `Erledigte Checklistenpunkte: ${reportCheckedItems.join(", ")}.` : `Beim Auftrag ${selectedOrder?.id || ""} wurden noch keine Checklistenpunkte abgehakt.`; setReportText((current) => `${current}\n${text}`.trim()); showNotice("Checkliste wurde übernommen."); };
-  const addPhotoNoteToReport = () => { const photoNames = Object.keys(photos); const text = photoNames.length ? `Fotodokumentation erstellt: ${photoNames.join(", ")}.` : "Fotodokumentation wurde vorbereitet, aber noch keine Fotos hinzugefügt."; setReportText((current) => `${current}\n${text}`.trim()); showNotice("Foto-Notiz eingefügt."); };
-  const saveReportEntry = () => { const entry = { id: Date.now(), mode: reportMode, status: reportStatus, text: reportProposal, orderId: selectedOrder?.id || "", createdAt: new Date().toLocaleString("de-DE"), createdBy: currentPerson?.id || authUser?.id || "", userName: currentPerson?.name || authUser?.name || "", masterComment: reportMasterComment }; setSavedReports((entries) => [entry, ...entries]); showNotice("Berichtsheft-Eintrag gespeichert."); };
+  const addPhotoNoteToReport = () => { const photoNames = Object.keys(orderPhotos); const text = photoNames.length ? `Fotodokumentation erstellt: ${photoNames.join(", ")}.` : "Fotodokumentation wurde vorbereitet, aber noch keine Fotos hinzugefügt."; setReportText((current) => `${current}\n${text}`.trim()); showNotice("Foto-Notiz eingefügt."); };
+  const saveReportEntry = () => { const entry = { id: Date.now(), mode: reportMode, status: reportStatus, text: reportProposal, orderId: selectedOrder?.id || "", createdAt: new Date().toLocaleString("de-DE"), createdBy: currentPerson?.id || authUser?.id || "", userName: currentPerson?.name || authUser?.name || "", masterComment: reportMasterComment }; setSavedReports((entries) => [entry, ...entries]); addToSyncQueue("Berichtsheft gespeichert", { reportId: entry.id, orderId: entry.orderId, status: entry.status }); showNotice("Berichtsheft-Eintrag gespeichert."); };
   const generateWeeklyReport = () => { const weekOrders = orders.slice(0, 5); const text = `Wochenbericht automatisch erstellt. Berücksichtigte Aufträge: ${weekOrders.map((order) => `${order.id} ${productTypes.find((p) => p.id === order.product)?.name || "Produkt"} bei ${order.customer}`).join("; ")}. Schwerpunkte waren Aufmaß, Montagevorbereitung, Checklistenbearbeitung, Funktionsprüfung, Dokumentation und Kundenkommunikation.`; setReportMode("Wochenbericht"); setReportText(text); showNotice("Wochenbericht erzeugt."); };
   const exportCurrentReport = () => { const text = `BERICHTSHEFT-EXPORT\nDatum: ${new Date().toLocaleString("de-DE")}\nStatus: ${reportStatus}\nAuftrag: ${selectedOrder?.id || ""}\n\n${reportProposal}\n\nMeister-Kommentar:\n${reportMasterComment || "-"}`; setReportExportText(text); setBackupText(text); showNotice("Export erzeugt."); };
-  const approveLatestReport = () => { if (!savedReports[0]) { showNotice("Es gibt noch keinen gespeicherten Bericht."); return; } setSavedReports((entries) => entries.map((entry, index) => index === 0 ? { ...entry, status: "Freigegeben", masterComment: reportMasterComment || entry.masterComment || "Freigegeben." } : entry)); setReportStatus("Freigegeben"); showNotice("Letzter Bericht freigegeben."); };
-  const deleteReport = (id) => { setSavedReports((entries) => entries.filter((entry) => entry.id !== id)); showNotice("Bericht gelöscht."); };
+  const approveLatestReport = () => { if (!savedReports[0]) { showNotice("Es gibt noch keinen gespeicherten Bericht."); return; } const reportId = savedReports[0].id; setSavedReports((entries) => entries.map((entry, index) => index === 0 ? { ...entry, status: "Freigegeben", masterComment: reportMasterComment || entry.masterComment || "Freigegeben." } : entry)); setReportStatus("Freigegeben"); addToSyncQueue("Berichtsheft freigegeben", { reportId, status: "Freigegeben" }); showNotice("Letzter Bericht freigegeben."); };
+  const deleteReport = (id) => { setSavedReports((entries) => entries.filter((entry) => entry.id !== id)); addToSyncQueue("Berichtsheft gelöscht", { reportId: id }); showNotice("Bericht gelöscht."); };
   const addNote = () => { if (!favorite.trim()) return; setNotes((n) => [{ id: Date.now(), text: favorite, module: active }, ...n]); setFavorite(""); };
-  const runPhotoAnalysis = (label) => { const analysis = photos[label] ? `${label}: Foto '${photos[label].name}' wurde Auftrag ${selectedOrder?.id || "ohne Auftrag"} zugeordnet. Vorschlag: im Protokoll verwenden und beim Abschluss prüfen.` : `${label}: Noch kein Foto vorhanden.`; setPhotoAnalyses((current) => ({ ...current, [label]: analysis })); };
+  const runPhotoAnalysis = (label) => { const photo = orderPhotos[label]; const analysis = photo ? `${label}: Foto '${photo.name}' wurde Auftrag ${selectedOrder?.id || "ohne Auftrag"} zugeordnet. Vorschlag: im Protokoll verwenden und beim Abschluss prüfen.` : `${label}: Noch kein Foto vorhanden.`; if (selectedOrder) setPhotoAnalyses((current) => ({ ...current, [selectedOrder.id]: { ...(current[selectedOrder.id] || {}), [label]: analysis } })); };
+  const saveDiagnosisToOrder = (draft) => { if (!selectedOrder) return; const entry = { id: `DIA-${Date.now()}`, ...draft, product: selectedOrder.product, manufacturer: selectedOrder.manufacturer || "", drive: selectedOrder.drive || "", substrate: selectedOrder.substrate || "", createdAt: new Date().toLocaleString("de-DE"), createdBy: authUser?.name || "System" }; setOrders((list) => list.map((order) => order.id === selectedOrder.id ? { ...order, diagnoses: [entry, ...(order.diagnoses || [])], updatedAt: entry.createdAt, statusHistory: [...(order.statusHistory || []), { status: order.status, at: entry.createdAt, by: entry.createdBy, note: `Diagnose gespeichert: ${entry.issue || entry.result || "Ergebnis"}` }] } : order)); addToSyncQueue("Diagnose zum Auftrag gespeichert", { orderId: selectedOrder.id, recordId: entry.id }); showNotice("Diagnose wurde in der Auftragsakte gespeichert."); };
   const generateKiAnswer = () => { const warnings = []; if (selectedOrder?.substrate === "WDVS") warnings.push("WDVS-Abstandsmontage und Abdichtung prüfen"); if (selectedOrder?.drive?.includes("Funk")) warnings.push("Senderkanal, Reichweite und Gruppensteuerung testen"); if (selectedOrder?.windCritical) warnings.push("Windklasse, Sensorik und Kundenhinweis dokumentieren"); setGeneratedAiResponse(`Prüfvorschlag für ${selectedOrder?.id || "aktuellen Auftrag"}: Produkt ${selectedProduct.name}, Untergrund ${selectedOrder?.substrate || "unbekannt"}, Antrieb ${selectedOrder?.drive || "unbekannt"}. Nächste Schritte: Aufmaß prüfen, Checkliste öffnen, Fotos ergänzen, ${warnings.length ? warnings.join("; ") : "Standardprüfung durchführen"}, Abschlussprüfung öffnen.`); };
-  const createSnapshot = () => ({ version: "1.7-ersatzteile", exportedAt: new Date().toISOString(), authUser, company, companyPeople, orders, checks, notes, savedReports, measurementValues, manualQuality, photoAnalyses, pdfDocuments, moduleChecks, partRequests, learningProgress, sketchImage, savedSketches });
+  const recordTechnicalUse = (entry) => {
+    if (!entry?.id || !entry?.label) return;
+    setTechnicalRecents((current) => [{ id: entry.id, type: entry.type, label: entry.label, route: entry.route, usedAt: new Date().toISOString() }, ...(Array.isArray(current) ? current : []).filter((item) => !(item.id === entry.id && item.type === entry.type))].slice(0, 12));
+  };
+  const toggleTechnicalFavorite = (setter, id) => setter((current) => {
+    const values = Array.isArray(current) ? current : [];
+    if (values.includes(id)) return values.filter((item) => item !== id);
+    if (values.length >= 8) { showNotice("Es können maximal acht Technik-Favoriten gespeichert werden."); return values; }
+    return [...values, id];
+  });
+  const updateTechnicalNote = (key, value) => setTechnicalNotes((current) => ({ ...(current || {}), [key]: value }));
+  const openNameplateAssistant = () => { setActive("photos"); showNotice("Typenschildfoto öffnen. Nur erkannte Werte übernehmen."); };
+  const openTechnicalDiagnosis = (source) => {
+    const diagnosis = source?.start ? source : allDiagnosisTrees.find((item) => (source?.diagnosisIds || []).includes(item.id));
+    setDiagnosisCategory("all");
+    setDiagnosisQuery(diagnosis?.title || source?.name || source?.label || "");
+    setActive("diagnose");
+    if (diagnosis) recordTechnicalUse({ type: "Diagnose", id: diagnosis.id, label: diagnosis.title, route: "diagnose" });
+  };
+  const openTechnicalParts = (source) => {
+    setPartQuery(source?.partCategories?.[0] || source?.partCategory || source?.name || source?.label || "");
+    setPartMode("search");
+    setActive("parts");
+  };
+  const createPartRequestFromDiagnosis = (diagnosis) => {
+    setPartRequest({ ...createEmptyPartRequest(selectedOrder), part: diagnosis?.partCategories?.[0] || "", requestedPart: diagnosis?.partCategories?.[0] || "", diagnosisId: diagnosis?.id || "", errorDescription: `Diagnose: ${diagnosis?.title || "Fehlerbild"}. ${diagnosis?.start?.q || ""}`.trim(), manufacturer: selectedOrder?.manufacturer || "", motor: selectedOrder?.drive || "" });
+    setPartMode("request");
+    setActive("parts");
+    if (diagnosis?.id) recordTechnicalUse({ type: "Diagnose", id: diagnosis.id, label: diagnosis.title, route: "diagnose" });
+    showNotice("Diagnosedaten wurden in die Ersatzteil-Anfrage übernommen.");
+  };
+  const openTechnicalResult = (result) => {
+    if (!result) return;
+    recordTechnicalUse({ ...result, id: result.sourceId || result.id });
+    if (result.route === "manufacturers") setManufacturerQuery(result.label || "");
+    if (result.route === "motors") setMotorQuery(result.label || "");
+    if (result.route === "diagnose") { setDiagnosisCategory("all"); setDiagnosisQuery(result.label || ""); }
+    if (result.route === "parts") { setPartMode("search"); setPartQuery(result.label || ""); }
+    navigateTo(result.route);
+  };
+  const openOrderTechnicalArea = (target) => {
+    if (target === "manufacturers") setManufacturerQuery(selectedOrder?.manufacturer || selectedProduct?.name || "");
+    if (target === "motors") setMotorQuery([selectedOrder?.drive, selectedOrder?.manufacturer, selectedProduct?.name].filter(Boolean).join(" "));
+    if (target === "parts") { setPartMode("search"); setPartQuery(selectedProduct?.name || ""); }
+    navigateTo(target === "diagnosis" ? "diagnose" : target);
+  };
+  const setOrderWaitingForMaterial = (orderId) => {
+    if (!orderId) return;
+    const stamp = new Date().toLocaleString("de-DE");
+    setOrders((list) => list.map((order) => order.id === orderId ? { ...order, status: "Wartet auf Material", updatedAt: stamp, statusHistory: [...(order.statusHistory || []), { status: "Wartet auf Material", at: stamp, by: authUser?.name || "System", note: "Manuell aus Ersatzteil-Anfrage gesetzt" }] } : order));
+    addToSyncQueue("Auftrag wartet auf Material", { orderId, status: "Wartet auf Material" }, { immediate: true });
+    showNotice("Auftrag wurde auf „Wartet auf Material“ gesetzt.");
+  };
+  const createSnapshot = () => ({ version: "2.1-technical-workspace", exportedAt: new Date().toISOString(), authUser, company, companyPeople, orders, checks, notes, savedReports, measurementValues, manualQuality, photos, photoAnalyses, pdfDocuments, moduleChecks, partRequests, learningProgress, sketchImage, savedSketches, manufacturerFavorites, motorFavorites, technicalRecents, technicalNotes });
     const pushToCloud = () => { const snapshot = createSnapshot(); saveJson(`rs-cloud-${cloudCompanyId}`, snapshot); setBackupText(JSON.stringify(snapshot, null, 2)); addSyncLog("Daten im lokalen Cloud-Snapshot gespeichert"); };
-  const pullFromCloud = () => { const snapshot = loadJson(`rs-cloud-${cloudCompanyId}`, null); if (!snapshot) { addSyncLog("Kein lokaler Cloud-Snapshot gefunden", "fehlt"); return; } setOrders(snapshot.orders || []); setChecks(snapshot.checks || {}); setNotes(snapshot.notes || []); setSavedReports(snapshot.savedReports || []); setMeasurementValues(snapshot.measurementValues || {}); setManualQuality(snapshot.manualQuality || {}); setPhotoAnalyses(snapshot.photoAnalyses || {}); setCompany(snapshot.company || defaultCompany()); setCompanyPeople(snapshot.companyPeople || defaultCompanyPeople()); setSyncQueue(snapshot.syncQueue || []); setPdfDocuments(snapshot.pdfDocuments || []); setPartRequests(snapshot.partRequests || []); setLearningProgress(snapshot.learningProgress || {}); setSketchImage(snapshot.sketchImage || ""); setSavedSketches(snapshot.savedSketches || []); addSyncLog("Daten aus lokalem Cloud-Snapshot geladen"); };
+  const pullFromCloud = () => { const snapshot = loadJson(`rs-cloud-${cloudCompanyId}`, null); if (!snapshot) { addSyncLog("Kein lokaler Cloud-Snapshot gefunden", "fehlt"); return; } applyRemoteSnapshot(snapshot); updateSyncQueue(() => restoreSyncQueue(snapshot.syncQueue || [])); addSyncLog("Daten aus lokalem Cloud-Snapshot geladen"); };
   const exportBackup = () => { const text = JSON.stringify(createSnapshot(), null, 2); setBackupText(text); addSyncLog("Backup erzeugt"); };
-  const importBackup = () => { try { const snapshot = JSON.parse(backupText); setOrders(snapshot.orders || []); setChecks(snapshot.checks || {}); setNotes(snapshot.notes || []); setSavedReports(snapshot.savedReports || []); setMeasurementValues(snapshot.measurementValues || {}); setManualQuality(snapshot.manualQuality || {}); setPhotoAnalyses(snapshot.photoAnalyses || {}); setCompany(snapshot.company || defaultCompany()); setCompanyPeople(snapshot.companyPeople || defaultCompanyPeople()); setSyncQueue(snapshot.syncQueue || []); setPdfDocuments(snapshot.pdfDocuments || []); setPartRequests(snapshot.partRequests || []); setLearningProgress(snapshot.learningProgress || {}); setSketchImage(snapshot.sketchImage || ""); setSavedSketches(snapshot.savedSketches || []); addSyncLog("Backup importiert"); } catch { addSyncLog("Backup konnte nicht gelesen werden", "fehler"); } };
+  const importBackup = () => { try { const snapshot = JSON.parse(backupText); applyRemoteSnapshot(snapshot); updateSyncQueue(() => restoreSyncQueue(snapshot.syncQueue || [])); addSyncLog("Backup importiert"); } catch { addSyncLog("Backup konnte nicht gelesen werden", "fehler"); } };
 
-  const screen = (content) => canOpenModule(active) ? <motion.main initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}>{content}</motion.main> : null;
+  const screen = (content) => canOpenModule(active) ? <motion.main initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}>
+    <SectionTabs active={active} favorites={navigationFavorites} group={activeNavigationGroup} onNavigate={navigateTo} onToggleFavorite={toggleNavigationFavorite} />
+    {content}
+  </motion.main> : null;
 
   useEffect(() => {
     if (!isSupabaseConfigured || !supabase) return;
@@ -1273,17 +1444,61 @@ Kopie/Nachfolgeauftrag aus ${selectedOrder.id}`.trim(), statusHistory: [{ status
   }, [authUser?.id, authUser?.companyId, offline]);
 
   const syncOwnerKey = authUser ? `${authUser.id}:${authUser.companyId || company.id}` : "";
-  const syncChangeToken = useMemo(() => ({}), [company, companyPeople, orders, checks, notes, savedReports, measurementValues, manualQuality, photoAnalyses, pdfDocuments, moduleChecks, partRequests, learningProgress, sketchImage, savedSketches]);
+  const syncChangeToken = useMemo(() => ({}), [company, companyPeople, orders, checks, notes, savedReports, measurementValues, manualQuality, photos, photoAnalyses, pdfDocuments, moduleChecks, partRequests, learningProgress, sketchImage, savedSketches, manufacturerFavorites, motorFavorites, technicalRecents, technicalNotes]);
   useAutoSync({
     ownerKey: syncOwnerKey,
     ready: initialCloudLoaded,
     enabled: Boolean(isSupabaseConfigured && supabase && authUser?.role !== "kunde"),
     offline,
     pendingVersion: pendingSyncVersion,
+    syncDelay: autoSyncState.delay,
     changeToken: syncChangeToken,
     onLocalChange: queueLocalChange,
     onSync: () => saveAppToSupabase(null, { quiet: true }),
   });
+
+  const canManageOrders = ["dev", "meister", "buero"].includes(appRole);
+  const canEditOrderWork = ["dev", "meister", "buero", "vorarbeiter", "monteur", "azubi"].includes(appRole);
+  const orderDetailProps = selectedOrder ? {
+    order: selectedOrder,
+    product: selectedProduct,
+    companyPeople,
+    canManage: canManageOrders,
+    canEditWork: canEditOrderWork,
+    canOpenModule,
+    stages: workflowStages,
+    syncStatus: selectedOrderSyncStatus,
+    openItems: selectedOrderOpenItems,
+    progressItems: orderProgressItems,
+    roleLabel: personRoleLabel,
+    checklist: { items: selectedChecklistItems, values: checks[selectedOrder.id] || {} },
+    measurement: { fields: measurementFields, values: orderMeasurements, missing: missingMeasurements },
+    photos: { values: orderPhotos, analyses: orderPhotoAnalyses },
+    documents: { orderDocuments, openPartRequests: openOrderPartRequests },
+    actions: {
+      archive: archiveSelectedOrder,
+      createRework: () => createReworkOrder({ keepSourceSelected: true }),
+      navigate: openOrderTechnicalArea,
+      update: updateSelectedOrder,
+      updateStatus: (status) => updateSelectedOrderStatus(status, "Status in der Auftragsakte geändert"),
+      updateProduct: updateSelectedOrderProduct,
+      toggleAssignment,
+      assignCustomer: assignCustomerToOrder,
+      toggleCheck,
+      setMeasurementField,
+      uploadPhoto,
+      updatePhotoNote,
+      analyzePhoto: runPhotoAnalysis,
+      startPartRequest: startPartRequestForSelectedOrder,
+      saveDiagnosis: saveDiagnosisToOrder,
+    },
+    panels: {
+      sketches: <SketchesPage checkButton={checkButton} deleteSketch={deleteSketchRecord} orders={visibleOrders} saveSketch={saveSketchRecord} savedSketches={(Array.isArray(savedSketches) ? savedSketches : []).filter((sketch) => !sketch.orderId || sketch.orderId === selectedOrder.id)} selectedOrderId={selectedOrder.id} setSketchImage={setSketchImage} showNotice={showNotice} sketchImage={sketchImage} />,
+      diagnosis: <DiagnosisPage checkButton={checkButton} diagnosisCategories={diagnosisCategories} diagnosisCategory={diagnosisCategory} diagnosisQuery={diagnosisQuery} filteredDiagnosisTrees={filteredDiagnosisTrees} moduleChecks={moduleChecks} onCreatePartRequest={createPartRequestFromDiagnosis} onOpenParts={openTechnicalParts} onUse={recordTechnicalUse} selectedOrder={selectedOrder} selectedProduct={selectedProduct} setDiagnosisCategory={setDiagnosisCategory} setDiagnosisQuery={setDiagnosisQuery} />,
+      parts: <PartsPage checkButton={checkButton} loadPartRequestDraft={loadPartRequestDraft} mode={partMode} moduleChecks={moduleChecks} newPartRequestDraft={newPartRequestDraft} notes={technicalNotes} onAnalyzeNameplate={openNameplateAssistant} onNoteChange={updateTechnicalNote} onSetOrderWaitingMaterial={setOrderWaitingForMaterial} onUse={recordTechnicalUse} orders={visibleOrders} partPhotoRequirements={partPhotoRequirements} partPhotoScope={partPhotoScope} partQuery={partQuery} partRequest={partRequest} partRequests={orderPartRequests} partRequestText={partRequestText} savePartRequestDraft={savePartRequestDraft} selectedOrder={selectedOrder} setMode={setPartMode} setPartQuery={setPartQuery} setPartRequest={setPartRequest} updatePartRequestStatus={updatePartRequestStatus} />,
+      completion: (openArea) => <CloseOrderPage closeReady={closeReady} closingGroups={closingGroups} closingValues={closingValues} completionNote={selectedOrder.completionNote || ""} completeSelectedOrder={completeSelectedOrder} createReworkOrder={() => createReworkOrder({ keepSourceSelected: true })} missingClosingItems={unresolvedQuality} openArea={openArea} selectedChecklistProgress={selectedChecklistProgress} selectedOrder={selectedOrder} selectedProduct={selectedProduct} setQualityValue={setQualityValue} startPartRequest={() => startPartRequestForSelectedOrder(false)} toggleQuality={toggleQuality} updateCompletionNote={(value) => updateSelectedOrder({ completionNote: value })} />,
+    },
+  } : null;
 
   if (!authUser) {
     return <LoginGate
@@ -1307,33 +1522,43 @@ Kopie/Nachfolgeauftrag aus ${selectedOrder.id}`.trim(), statusHistory: [{ status
     />;
   }
 
-  const navigationStatus = { offline, pendingCount: pendingSyncCount, lastSyncedAt, error: syncError };
+  const navigationStatus = {
+    offline,
+    pendingCount: pendingSyncCount,
+    failedCount: failedSyncCount,
+    lastSyncedAt,
+    error: syncError,
+    syncing,
+    onRetry: retrySync,
+    showTechnicalDetails: authUser.role === "dev",
+  };
 
   return <div className={`min-h-screen bg-gradient-to-br from-slate-50 via-white to-slate-100 text-slate-950 ${device.isMobile ? "p-3 pb-24" : "p-4"}`}>
     <div className={`mx-auto grid max-w-[1600px] gap-5 ${device.isMobile ? "" : sidebarCollapsed ? "grid-cols-[78px_minmax(0,1fr)]" : "grid-cols-[270px_minmax(0,1fr)]"}`}>
-      {!device.isMobile && <DesktopSidebar active={active} collapsed={sidebarCollapsed} favorites={navigationFavorites} groups={roleNavigationGroups} onLogout={logoutSupabase} onNavigate={navigateTo} onToggleCollapsed={() => setSidebarCollapsed((value) => !value)} onToggleFavorite={toggleNavigationFavorite} status={navigationStatus} />}
+      {!device.isMobile && <DesktopSidebar active={active} collapsed={sidebarCollapsed} groups={roleNavigationGroups} onLogout={logoutSupabase} onNavigate={navigateTo} onToggleCollapsed={() => setSidebarCollapsed((value) => !value)} />}
       <main className="min-w-0">
-        <TopBar role={appRole} setRole={setRole} offline={offline} pendingSyncCount={pendingSyncCount} lastSyncedAt={lastSyncedAt} syncError={syncError} compact={device.isMobile} currentUser={authUser} search={<GlobalSearch items={visibleNavigationItems} onNavigate={navigateTo} onOpenOrder={openSearchOrder} orders={visibleOrders} />} />
+        <TopBar role={appRole} setRole={setRole} offline={offline} pendingSyncCount={pendingSyncCount} failedSyncCount={failedSyncCount} lastSyncedAt={lastSyncedAt} syncError={syncError} syncing={syncing} onRetrySync={retrySync} compact={device.isMobile} currentUser={authUser} search={<GlobalSearch items={visibleNavigationItems} onNavigate={navigateTo} onOpenOrder={openSearchOrder} orders={visibleOrders} />} />
         {notice && <div className="mb-4 rounded-2xl bg-emerald-50 p-3 text-sm font-bold text-emerald-800">{notice}</div>}
         <Header role={appRole} orders={visibleOrders} selectedOrder={selectedOrder} compact={device.isMobile} moduleCount={visibleNavigationItems.length} />
         <QuickAccessBar favorites={navigationFavorites} items={visibleNavigationItems} onNavigate={navigateTo} onToggleFavorite={toggleNavigationFavorite} />
         {device.isMobile && <MobileBottomNav active={active} favorites={navigationFavorites} groups={roleNavigationGroups} items={mobilePrimaryItems} onLogout={logoutSupabase} onNavigate={navigateTo} onToggleFavorite={toggleNavigationFavorite} status={navigationStatus} />}
     {active === "dashboard" && screen(<DashboardPage activeOrders={activeOrders} allowedNav={visibleNavigationItems} appRole={appRole} canOpenModule={canOpenModule} company={company} learningDashboard={learningDashboard} openReports={openReports} orders={orders} photos={photos} roleHome={roleHome} setActive={navigateTo} setSelectedOrderId={setSelectedOrderId} todaysOrders={todaysOrders} visibleOrders={visibleOrders} />)}
     {active === "today" && screen(<div className="grid gap-5 lg:grid-cols-[1fr_0.8fr]"><Card><SectionTitle icon={ClipboardList} title="Heute / Tagesplanung" subtitle="Heutige Aufträge, offene Berichte und Schnellaktionen." /><div className="grid gap-3 md:grid-cols-3"><div className="rounded-3xl bg-slate-50 p-4"><p className="text-3xl font-black">{todaysOrders.length}</p><p className="text-sm text-slate-600">heutige Aufträge</p></div><div className="rounded-3xl bg-slate-50 p-4"><p className="text-3xl font-black">{openReports.length}</p><p className="text-sm text-slate-600">offene Berichte</p></div><div className="rounded-3xl bg-slate-50 p-4"><p className="text-3xl font-black">{Object.keys(photos).length}</p><p className="text-sm text-slate-600">Fotos</p></div></div><div className="mt-5 space-y-3">{todaysOrders.length === 0 && <div className="rounded-2xl bg-slate-50 p-4 text-sm font-bold text-slate-600">Heute sind noch keine Aufträge geplant.</div>}{todaysOrders.map((o) => <button key={o.id} onClick={() => { setSelectedOrderId(o.id); setActive("orders"); }} className="w-full rounded-3xl bg-slate-50 p-4 text-left hover:bg-white hover:shadow-md"><div className="flex items-center justify-between"><strong>{o.time} · {o.customer}</strong><Badge>{o.status}</Badge></div><p className="mt-1 text-sm text-slate-600">{o.address}</p><div className="mt-2 flex flex-wrap gap-2"><Badge>{productTypes.find((p) => p.id === o.product)?.name}</Badge><Badge>{o.assignedTo || "ohne Monteur"}</Badge></div></button>)}</div></Card><Card><SectionTitle icon={CheckCircle2} title="Schnellprüfung" subtitle="Was heute offen sein könnte." /><div className="space-y-3">{["Aufträge mit Status offen prüfen", "Checklisten vor Ort abhaken", "Vorher-/Nachher-Fotos ergänzen", "Berichtsheft am Tagesende speichern", "Kundennachricht bei Verzögerung senden"].map((item) => <div key={item} className="rounded-2xl bg-slate-50 p-4 text-sm font-bold">{item}</div>)}</div></Card></div>)}
-    {active === "orders" && screen(<OrdersPage addOrder={addOrder} archiveSelectedOrder={archiveSelectedOrder} canOpenModule={canOpenModule} createReworkOrder={createReworkOrder} deleteSelectedOrder={deleteSelectedOrder} filteredOrders={filteredOrders} newOrder={newOrder} newOrderChecklistPreview={newOrderChecklistPreview} newOrderProduct={newOrderProduct} orderSearch={orderSearch} selectedOrder={selectedOrder} selectedOrderId={selectedOrderId} setActive={navigateTo} setNewOrder={setNewOrder} setOrderSearch={setOrderSearch} setSelectedOrderId={setSelectedOrderId} startPartRequest={startPartRequestForSelectedOrder} updateSelectedOrder={updateSelectedOrder} updateSelectedOrderProduct={updateSelectedOrderProduct} workflowStages={workflowStages} />)}
+    {active === "orders" && screen(<OrdersPage addOrder={addOrder} canCreate={canManageOrders} canManage={canManageOrders} deleteSelectedOrder={deleteSelectedOrder} detailProps={orderDetailProps} filteredOrders={filteredOrders} newOrder={newOrder} newOrderChecklistPreview={newOrderChecklistPreview} newOrderProduct={newOrderProduct} orderOpenCounts={orderOpenCounts} orderSearch={orderSearch} selectedOrder={selectedOrder} selectedOrderId={selectedOrderId} setNewOrder={setNewOrder} setOrderSearch={setOrderSearch} setSelectedOrderId={setSelectedOrderId} />)}
     {active === "workflow" && screen(<WorkflowPage archiveSelectedOrder={archiveSelectedOrder} canOpenModule={canOpenModule} createOrderFromWorkflowTemplate={createOrderFromWorkflowTemplate} createReworkOrder={createReworkOrder} currentOrderHistory={currentOrderHistory} duplicateSelectedOrder={duplicateSelectedOrder} orderWorkflowTemplates={orderWorkflowTemplates} selectedOrder={selectedOrder} selectedProduct={selectedProduct} selectedWorkflowTemplate={selectedWorkflowTemplate} setActive={setActive} setWorkflowTemplateId={setWorkflowTemplateId} workflowStages={workflowStages} workflowTemplateId={workflowTemplateId} />)}
-    {active === "closeOrder" && screen(<CloseOrderPage closeReady={closeReady} closingGroups={closingGroups} closingValues={closingValues} completeSelectedOrder={completeSelectedOrder} createReworkOrder={() => createReworkOrder({ keepSourceSelected: true })} missingClosingItems={unresolvedQuality} openArea={setActive} selectedChecklistProgress={selectedChecklistProgress} selectedOrder={selectedOrder} selectedProduct={selectedProduct} setQualityValue={setQualityValue} startPartRequest={startPartRequestForSelectedOrder} toggleQuality={toggleQuality} />)}
+    {active === "closeOrder" && screen(<CloseOrderPage closeReady={closeReady} closingGroups={closingGroups} closingValues={closingValues} completionNote={selectedOrder?.completionNote || ""} completeSelectedOrder={completeSelectedOrder} createReworkOrder={() => createReworkOrder({ keepSourceSelected: true })} missingClosingItems={unresolvedQuality} openArea={setActive} selectedChecklistProgress={selectedChecklistProgress} selectedOrder={selectedOrder} selectedProduct={selectedProduct} setQualityValue={setQualityValue} startPartRequest={startPartRequestForSelectedOrder} toggleQuality={toggleQuality} updateCompletionNote={(value) => updateSelectedOrder({ completionNote: value })} />)}
     {active === "products" && screen(<ProductLexiconPage checkButton={checkButton} moduleChecks={moduleChecks} selectedOrder={selectedOrder} selectedProduct={selectedProduct} />)}
-  {active === "checklists" && screen(<Card><SectionTitle icon={ClipboardCheck} title="Checklisten pro Produkt" subtitle="Checkliste richtet sich automatisch nach Produkt, Untergrund, Antrieb und Windlage." /><div className="mb-5 rounded-3xl bg-slate-50 p-4"><div className="grid gap-4 lg:grid-cols-[1fr_0.7fr]"><div><strong>{selectedOrder?.id} · {selectedProduct.name}</strong><p className="mt-1 text-sm text-slate-600">{selectedOrder?.customer}</p><label className="mt-4 block text-sm font-bold text-slate-800">Produkt<select value={selectedOrder?.product || ""} onChange={(e) => updateSelectedOrderProduct(e.target.value)} className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm font-bold">{productTypes.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select></label></div><div className="rounded-3xl bg-white p-4"><div className="flex items-center justify-between text-sm font-bold"><span>Fortschritt</span><span>{selectedChecklistDone}/{selectedChecklistItems.length}</span></div><div className="mt-3 h-3 overflow-hidden rounded-full bg-slate-100"><div className="h-full rounded-full bg-slate-950 transition-all" style={{ width: `${selectedChecklistProgress}%` }} /></div><p className="mt-2 text-xs font-semibold text-slate-500">{selectedChecklistProgress}% erledigt</p></div></div></div><div className="grid gap-3 md:grid-cols-2">{selectedChecklistItems.map((item) => <label key={item} className="flex cursor-pointer items-center gap-3 rounded-2xl bg-slate-50 p-4 text-sm font-bold"><input type="checkbox" checked={Boolean(checks[selectedOrder?.id]?.[item])} onChange={() => toggleCheck(selectedOrder?.id, item)} className="h-5 w-5 accent-slate-950" />{item}</label>)}</div></Card>)}
+  {active === "checklists" && screen(<OrderChecklist canEdit={canEditOrderWork} checks={checks[selectedOrder?.id] || {}} items={selectedChecklistItems} onProductChange={updateSelectedOrderProduct} onToggle={toggleCheck} order={selectedOrder} product={selectedProduct} />)}
     {active === "tools" && screen(<ToolsPage checkButton={checkButton} markScopeDone={markScopeDone} moduleChecks={moduleChecks} selectedOrder={selectedOrder} selectedProduct={selectedProduct} />)}
     {active === "substrates" && screen(<SubstratesPage checkButton={checkButton} moduleChecks={moduleChecks} selectedOrder={selectedOrder} selectedProduct={selectedProduct} />)}
-    {active === "motors" && screen(<MotorsPage checkButton={checkButton} moduleChecks={moduleChecks} selectedOrder={selectedOrder} selectedProduct={selectedProduct} />)}
-    {active === "diagnose" && screen(<DiagnosisPage checkButton={checkButton} diagnosisCategories={diagnosisCategories} diagnosisCategory={diagnosisCategory} diagnosisQuery={diagnosisQuery} filteredDiagnosisTrees={filteredDiagnosisTrees} moduleChecks={moduleChecks} selectedOrder={selectedOrder} selectedProduct={selectedProduct} setDiagnosisCategory={setDiagnosisCategory} setDiagnosisQuery={setDiagnosisQuery} />)}
-    {active === "manufacturers" && screen(<ManufacturersPage checkButton={checkButton} filteredMakers={filteredMakers} manufacturerQuery={manufacturerQuery} moduleChecks={moduleChecks} selectedOrder={selectedOrder} selectedProduct={selectedProduct} setManufacturerQuery={setManufacturerQuery} />)}
-  {active === "measurement" && screen(<div className="grid gap-5 lg:grid-cols-[1fr_0.8fr]"><Card><SectionTitle icon={Wrench} title="Intelligenter Aufmaß-Assistent" subtitle="Pflichtfelder ändern sich je nach Produkt des aktiven Auftrags." /><div className="mb-4 rounded-3xl bg-slate-50 p-4"><h3 className="font-black">{selectedProduct.name}</h3><p className="mt-1 text-sm text-slate-600">Auftrag: {selectedOrder?.id} · {selectedOrder?.customer}</p></div><div className="grid gap-4 md:grid-cols-2">{measurementFields.map((field) => <Field key={field} label={field} value={orderMeasurements[field] || ""} onChange={(value) => setMeasurementField(field, value)} placeholder={`${field} eintragen`} />)}</div></Card><Card><SectionTitle icon={AlertTriangle} title="Aufmaß-Vollständigkeit" subtitle="Die App prüft fehlende Pflichtfelder." /><div className="mb-4 rounded-3xl bg-slate-950 p-5 text-white"><p className="text-4xl font-black">{measurementFields.length - missingMeasurements.length}/{measurementFields.length}</p><p className="text-sm text-white/70">Pflichtfelder ausgefüllt</p></div>{missingMeasurements.length === 0 ? <div className="rounded-3xl bg-emerald-50 p-5 text-sm font-bold text-emerald-900">Aufmaß vollständig.</div> : <div className="space-y-2">{missingMeasurements.map((field) => <div key={field} className="rounded-2xl bg-amber-50 p-3 text-sm font-bold text-amber-900">Fehlt: {field}</div>)}</div>}</Card></div>)}
+    {active === "technical" && screen(<TechnicalSearchPage manufacturerFavorites={manufacturerFavorites} onOpenResult={openTechnicalResult} query={technicalQuery} recents={technicalRecents} setQuery={setTechnicalQuery} />)}
+    {active === "motors" && screen(<MotorsPage checkButton={checkButton} favorites={motorFavorites} moduleChecks={moduleChecks} motorQuery={motorQuery} notes={technicalNotes} onAnalyzeNameplate={openNameplateAssistant} onNoteChange={updateTechnicalNote} onOpenDiagnosis={openTechnicalDiagnosis} onOpenParts={openTechnicalParts} onToggleFavorite={(id) => toggleTechnicalFavorite(setMotorFavorites, id)} onUse={recordTechnicalUse} selectedOrder={selectedOrder} selectedProduct={selectedProduct} setMotorQuery={setMotorQuery} />)}
+    {active === "diagnose" && screen(<DiagnosisPage checkButton={checkButton} diagnosisCategories={diagnosisCategories} diagnosisCategory={diagnosisCategory} diagnosisQuery={diagnosisQuery} filteredDiagnosisTrees={filteredDiagnosisTrees} moduleChecks={moduleChecks} onCreatePartRequest={createPartRequestFromDiagnosis} onOpenParts={openTechnicalParts} onUse={recordTechnicalUse} selectedOrder={selectedOrder} selectedProduct={selectedProduct} setDiagnosisCategory={setDiagnosisCategory} setDiagnosisQuery={setDiagnosisQuery} />)}
+    {active === "manufacturers" && screen(<ManufacturersPage checkButton={checkButton} favorites={manufacturerFavorites} filteredMakers={filteredMakers} manufacturerQuery={manufacturerQuery} moduleChecks={moduleChecks} notes={technicalNotes} onAnalyzeNameplate={openNameplateAssistant} onNoteChange={updateTechnicalNote} onOpenDiagnosis={openTechnicalDiagnosis} onOpenMotors={(maker) => { setMotorQuery(maker.name); setActive("motors"); }} onOpenParts={openTechnicalParts} onToggleFavorite={(id) => toggleTechnicalFavorite(setManufacturerFavorites, id)} onUse={recordTechnicalUse} selectedOrder={selectedOrder} selectedProduct={selectedProduct} setManufacturerQuery={setManufacturerQuery} />)}
+  {active === "measurement" && screen(<OrderMeasurement canEdit={canEditOrderWork} fields={measurementFields} missing={missingMeasurements} onChange={setMeasurementField} order={selectedOrder} product={selectedProduct} values={orderMeasurements} />)}
   {active === "offers" && screen(<div className="grid gap-5 lg:grid-cols-[1fr_0.7fr]"><Card><SectionTitle icon={Euro} title="Angebotsassistent" subtitle="Grobe Kalkulation mit Material, Lohn, Anfahrt, WDVS-Zuschlag und Entsorgung." /><div className="grid gap-4 md:grid-cols-2">{Object.entries(calc).map(([k, v]) => <Field key={k} label={k} type="number" value={v} onChange={(value) => setCalc({ ...calc, [k]: value })} />)}</div></Card><Card><SectionTitle icon={Calculator} title="Preisvorschau" subtitle="Grobe Struktur für ein Angebots-PDF." /><div className="space-y-3"><div className="flex justify-between rounded-2xl bg-slate-50 p-4"><span>Netto</span><strong>{net.toFixed(2)} €</strong></div><div className="flex justify-between rounded-2xl bg-slate-50 p-4"><span>MwSt. 19%</span><strong>{(net * 0.19).toFixed(2)} €</strong></div><div className="flex justify-between rounded-2xl bg-slate-950 p-4 text-white"><span>Brutto</span><strong>{(net * 1.19).toFixed(2)} €</strong></div></div><CopyBox title="Angebotstext kopieren" text={`Wir bieten Ihnen die Lieferung und Montage von ${selectedProduct.name} gemäß Aufmaß und technischer Klärung an. Untergrund, Stromanschluss und Herstellerangaben sind vor Ausführung zu prüfen.`} /></Card></div>)}
-  {active === "photos" && screen(<Card><SectionTitle icon={Camera} title="Foto-KI Workflow" subtitle="Fotos hochladen, zuordnen und als Prototyp auswerten." /><div className="grid gap-4 md:grid-cols-3">{["Typenschild", "Ersatzteil", "Untergrund", "Schaden", "Vorher", "Nachher"].map((label) => <div key={label} className="rounded-3xl bg-slate-50 p-5"><h3 className="font-black">{label}</h3><label className="mt-4 flex cursor-pointer flex-col items-center justify-center rounded-2xl border-2 border-dashed border-slate-200 bg-white p-4 text-sm font-bold"><Upload className="mb-2" />Foto hinzufügen<input type="file" accept="image/*" className="hidden" onChange={(e) => uploadPhoto(label, e.target.files?.[0])} /></label>{photos[label] && <img src={photos[label].url} alt={label} className="mt-4 h-40 w-full rounded-2xl object-cover" />}<button onClick={() => runPhotoAnalysis(label)} className="mt-3 w-full rounded-2xl bg-slate-950 px-4 py-2 text-sm font-bold text-white">{label} auswerten</button>{photoAnalyses[label] && <div className="mt-3 rounded-2xl bg-white p-3 text-xs font-bold leading-5 text-slate-600">{photoAnalyses[label]}</div>}</div>)}</div></Card>)}
-    {active === "parts" && screen(<PartsPage checkButton={checkButton} filteredParts={filteredParts} loadPartRequestDraft={loadPartRequestDraft} moduleChecks={moduleChecks} newPartRequestDraft={newPartRequestDraft} orders={visibleOrders} partGroup={partGroup} partPhotoScope={partPhotoScope} partQuery={partQuery} partRequest={partRequest} partRequests={partRequests} partRequestText={partRequestText} savePartRequestDraft={savePartRequestDraft} selectedOrder={selectedOrder} setPartGroup={setPartGroup} setPartQuery={setPartQuery} setPartRequest={setPartRequest} updatePartRequestStatus={updatePartRequestStatus} />)}
+  {active === "photos" && screen(<OrderPhotos canEdit={canEditOrderWork} onAnalyze={runPhotoAnalysis} onNoteChange={updatePhotoNote} onUpload={uploadPhoto} order={selectedOrder} photoAnalyses={orderPhotoAnalyses} photos={orderPhotos} />)}
+    {active === "parts" && screen(<PartsPage checkButton={checkButton} loadPartRequestDraft={loadPartRequestDraft} mode={partMode} moduleChecks={moduleChecks} newPartRequestDraft={newPartRequestDraft} notes={technicalNotes} onAnalyzeNameplate={openNameplateAssistant} onNoteChange={updateTechnicalNote} onSetOrderWaitingMaterial={setOrderWaitingForMaterial} onUse={recordTechnicalUse} orders={visibleOrders} partPhotoRequirements={partPhotoRequirements} partPhotoScope={partPhotoScope} partQuery={partQuery} partRequest={partRequest} partRequests={partRequests} partRequestText={partRequestText} savePartRequestDraft={savePartRequestDraft} selectedOrder={selectedOrder} setMode={setPartMode} setPartQuery={setPartQuery} setPartRequest={setPartRequest} updatePartRequestStatus={updatePartRequestStatus} />)}
   {active === "customers" && screen(<Card><SectionTitle icon={MessageSquareText} title="Kundenkommunikation mit Auftragsdaten" subtitle="Texte mit Platzhaltern werden aus dem aktiven Auftrag gefüllt." /><div className="mb-5 rounded-3xl bg-slate-50 p-4 text-sm leading-6"><strong>Aktiver Auftrag:</strong> {selectedOrder?.customer} · {selectedProduct.name} · {selectedOrder?.date} {selectedOrder?.time}</div><div className="grid gap-4 md:grid-cols-2">{customerTemplates.map((t) => <CopyBox key={t.title} title={t.title} text={customerTemplateForOrder(t.text)} />)}</div></Card>)}
     {active === "maintenance" && screen(<MaintenancePage checkButton={checkButton} moduleChecks={moduleChecks} selectedOrder={selectedOrder} selectedProduct={selectedProduct} />)}
     {(active === "learning" || active === "quiz") && screen(<LearningPage appRole={appRole} canViewTeam={canViewLearningTeam} companyPeople={companyPeople} currentLearnerId={learningUserId} currentPerson={currentPerson} initialView={active === "quiz" ? "quiz" : "learning"} learningProgress={learningProgress} myReports={myReports} updateLearningProgress={updateLearningProgress} />)}
