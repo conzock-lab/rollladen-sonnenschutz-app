@@ -72,7 +72,7 @@ import {
   restoreSyncQueue,
   retryFailedQueue,
 } from "./lib/syncQueue";
-import { loadLearningRecord, saveCompanySnapshot, saveLearningRecord } from "./services/supabaseSync";
+import { loadLearningRecord, saveAssignedOrderChanges, saveCompanySnapshot, saveLearningRecord } from "./services/supabaseSync";
 import { buildPdfPreview, createPdfFileName } from "./lib/pdfHelpers";
 import { buildOrderOpenItems, getOrderSyncStatus } from "./lib/orderWorkspace";
 import { buildPartRequestText, createEmptyPartRequest, getPartPhotoRequirements } from "./lib/partsHelpers";
@@ -106,7 +106,9 @@ import SubstratesPage from "./pages/SubstratesPage";
 import ToolsPage from "./pages/ToolsPage";
 import ProductLexiconPage from "./pages/ProductLexiconPage";
 import CustomerPortalPage from "./pages/CustomerPortalPage";
+import PlanningPage from "./pages/PlanningPage";
 import { navigationItems } from "./config/navigation";
+import { createPlanningAbsence } from "./lib/planning";
 
 const todayIso = () => new Date().toISOString().slice(0, 10);
 
@@ -423,7 +425,7 @@ export default function App() {
   const [role, setRoleState] = useLocalStorage("rs-role", "dev");
   const { offline } = useOnlineStatus();
   const [active, setActive] = useState("dashboard");
-  const [orders, setOrders] = useState(() => loadJson("rs-orders", [{ id: "A-1001", customer: "Musterkunde GmbH", contact: "Max Mustermann", phone: "", email: "", address: "Musterstraße 1", date: todayIso(), time: "08:00", assignedTo: "Max Mustermann", product: "vorbaurollladen", substrate: "WDVS", drive: "Funkmotor", installType: "Renovierung", windCritical: true, status: "offen", priority: "normal", orderType: "Montage", notes: "3 Elemente, Funkmotor, WDVS prüfen" }]));
+  const [orders, setOrders] = useState(() => loadJson("rs-orders", [{ id: "A-1001", customer: "Musterkunde GmbH", contact: "Max Mustermann", phone: "", email: "", address: "Musterstraße 1", date: todayIso(), time: "08:00", assignedTo: "Max Mustermann", product: "vorbaurollladen", substrate: "WDVS", drive: "Funkmotor", installType: "Renovierung", windCritical: true, status: "offen", priority: "normal", materialStatus: "nicht geprüft", orderType: "Montage", notes: "3 Elemente, Funkmotor, WDVS prüfen" }]));
   const [selectedOrderId, setSelectedOrderId] = useState(() => loadJson("rs-selected-order", "A-1001"));
   const [checks, setChecks] = useState(() => loadJson("rs-checks", {}));
   const [photos, setPhotos] = useState(() => loadJson("rs-order-photos", {}));
@@ -434,7 +436,7 @@ export default function App() {
   const [authUser, setAuthUser] = useState(() => loadJson("rs-auth-user", null));
   const [syncLog, setSyncLog] = useState(() => loadJson("rs-sync-log", []));
   const [photoAnalyses, setPhotoAnalyses] = useState(() => loadJson("rs-photo-analyses", {}));
-  const [newOrder, setNewOrder] = useState({ customer: "", contact: "", phone: "", email: "", address: "", date: todayIso(), time: "08:00", assignedTo: "", product: "vorbaurollladen", substrate: "Beton", drive: "Funkmotor", installType: "Renovierung", windCritical: false, priority: "normal", orderType: "Montage", notes: "" });
+  const [newOrder, setNewOrder] = useState({ customer: "", contact: "", phone: "", email: "", address: "", date: todayIso(), time: "08:00", assignedTo: "", product: "vorbaurollladen", substrate: "Beton", drive: "Funkmotor", installType: "Renovierung", windCritical: false, priority: "normal", materialStatus: "nicht geprüft", orderType: "Montage", notes: "" });
   const [orderSearch, setOrderSearch] = useState("");
   const [notice, setNotice] = useState("");
   const [diagnosisQuery, setDiagnosisQuery] = useState("");
@@ -474,6 +476,7 @@ export default function App() {
   const [pdfFormData, setPdfFormData] = useState(() => loadJson("rs-pdf-form-data", {}));
   const [company, setCompany] = useState(() => loadJson("rs-company", defaultCompany()));
   const [companyPeople, setCompanyPeople] = useState(() => loadJson("rs-company-people", defaultCompanyPeople()));
+  const [planningAbsences, setPlanningAbsences] = useLocalStorage("rs-planning-absences", []);
   const [personForm, setPersonForm] = useState({ name: "", role: "monteur", phone: "", address: "", team: "Kolonne 1", trainingYear: "1" });
   const [codeLogin, setCodeLogin] = useState({ name: "", code: "" });
   const [supabaseStatus, setSupabaseStatus] = useState("");
@@ -645,11 +648,20 @@ export default function App() {
   ];
   const selectedOrderSyncStatus = getOrderSyncStatus(syncQueue, selectedOrder?.id, Boolean(lastSyncedAt));
   const filteredOrders = visibleOrders.filter((o) => [o.id, o.customer, o.address, o.status, o.priority, o.orderType, o.manufacturer, o.notes, o.internalNotes, o.technicianNote, productTypes.find((p) => p.id === o.product)?.name || "", ...(o.assignedMemberIds || []).map((id) => companyPeople.find((p) => p.id === id)?.name || "")].join(" ").toLowerCase().includes(orderSearch.toLowerCase()));
+  const pendingPlanningOrderIds = useMemo(() => [...new Set(syncQueue.filter((item) => item.status !== "synced" && ["planning", "order"].includes(item.type)).map((item) => item.recordId).filter(Boolean))], [syncQueue]);
   const todaysOrders = visibleOrders.filter((o) => o.date === todayIso());
   const openReports = savedReports.filter((r) => r.status !== "Freigegeben");
   const activeOrders = visibleOrders.filter((o) => !["Erledigt", "Archiviert"].includes(normalizeOrderStatus(o.status)));
   const waitingPartOrders = visibleOrders.filter((o) => normalizeOrderStatus(o.status) === "Wartet auf Material");
   const reworkOrders = visibleOrders.filter((o) => String(o.orderType || "").toLowerCase().includes("nacharbeit") || String(o.status || "").toLowerCase().includes("nacharbeit"));
+  const planningSummary = {
+    plannedToday: todaysOrders.length,
+    activePeople: new Set(todaysOrders.flatMap((order) => order.assignedMemberIds || [])).size,
+    unplanned: visibleOrders.filter((order) => !order.date || (!(order.assignedMemberIds || []).length && !order.assignedTo)).length,
+    materialProblems: visibleOrders.filter((order) => ["fehlt", "wartet auf Lieferung", "teilweise vorhanden"].includes(order.materialStatus)).length,
+    rework: reworkOrders.length,
+    openClosures: visibleOrders.filter((order) => normalizeOrderStatus(order.status) === "Abschluss offen").length,
+  };
   const roleHome = roleHomeConfig[appRole] || roleHomeConfig.monteur;
   const learningUserId = currentPerson?.id || authUser?.id || "local-azubi";
   const learningUserName = currentPerson?.name || authUser?.name || "";
@@ -997,9 +1009,32 @@ export default function App() {
     progress: Number(row.progress || 0),
     createdAt: row.created_at ? new Date(row.created_at).toLocaleString("de-DE") : "",
   });
+  const absenceToRow = (absence, companyId) => ({
+    id: absence.id,
+    company_id: companyId,
+    person_id: absence.personId,
+    start_date: absence.startDate,
+    end_date: absence.endDate,
+    type: absence.type,
+    note: absence.note || "",
+    created_at: absence.createdAt || new Date().toISOString(),
+    updated_at: absence.updatedAt || new Date().toISOString(),
+  });
+  const rowToAbsence = (row) => ({
+    id: row.id,
+    companyId: row.company_id,
+    personId: row.person_id,
+    startDate: row.start_date,
+    endDate: row.end_date,
+    type: row.type,
+    note: row.note || "",
+    createdAt: row.created_at || "",
+    updatedAt: row.updated_at || "",
+  });
   const applyRemoteSnapshot = (snapshot = {}) => {
     if (snapshot.company) setCompany(snapshot.company);
     if (snapshot.companyPeople) setCompanyPeople(snapshot.companyPeople);
+    if (Array.isArray(snapshot.planningAbsences)) setPlanningAbsences(snapshot.planningAbsences);
     if (snapshot.orders) setOrders(snapshot.orders);
     if (snapshot.checks) setChecks(snapshot.checks);
     if (snapshot.notes) setNotes(snapshot.notes);
@@ -1063,10 +1098,13 @@ export default function App() {
     const currentQueue = syncQueueRef.current;
     const allSyncItems = getSyncableQueueItems(currentQueue, { includeFailed: Boolean(options.force) });
     const personalLearningRole = ["azubi", "monteur", "vorarbeiter"].includes(authUser?.role);
+    const assignedFieldRole = ["monteur", "vorarbeiter"].includes(authUser?.role);
     const learningTypes = new Set(["learningProgress", "quizProgress", "practiceCase", "reportBook", "learningAssignment", "learningComment"]);
     const personalLearningItems = allSyncItems.filter((item) => learningTypes.has(item.type));
+    const assignedOrderItems = assignedFieldRole ? allSyncItems.filter((item) => ["order", "planning"].includes(item.type)) : [];
+    const hasPersonalChanges = personalLearningItems.length || assignedOrderItems.length;
     const syncItems = personalLearningRole
-      ? (personalLearningItems.length ? allSyncItems.filter((item) => learningTypes.has(item.type) || item.type === "snapshot") : [])
+      ? (hasPersonalChanges ? allSyncItems.filter((item) => learningTypes.has(item.type) || ["order", "planning", "snapshot"].includes(item.type)) : [])
       : allSyncItems;
     const syncItemIds = syncItems.map((item) => item.id);
     if (!syncItemIds.length && !overrideCompany && !options.forceSnapshot) return true;
@@ -1082,25 +1120,35 @@ export default function App() {
         .filter((item) => item.type === "order" && item.action.toLocaleLowerCase("de-DE").includes("gelöscht"))
         .map((item) => item.recordId)
         .filter(Boolean);
+      const deletedAbsenceIds = syncItems
+        .filter((item) => item.type === "absence" && item.action.toLocaleLowerCase("de-DE").includes("gelÃ¶scht"))
+        .map((item) => item.recordId)
+        .filter(Boolean);
 
       if (personalLearningRole) {
-        await saveLearningRecord({
-          client: supabase,
-          learningRow: {
-            company_id: activeCompany.id,
-            person_id: learningUserId,
-            data: {
-              learningProgress: learningProgress?.[learningUserId] || {},
-              quizProgress: quizProgress?.[learningUserId] || {},
-              practiceCases: learningPracticeCases.filter((item) => item.learnerId === learningUserId),
-              assignments: learningAssignments.filter((item) => item.learnerId === learningUserId),
-              comments: learningComments.filter((item) => item.learnerId === learningUserId),
-              learningLists: learningLists?.[learningUserId] || {},
-              reports: savedReports.filter((item) => item.createdBy === learningUserId || (!item.createdBy && item.userName === learningUserName)),
+        if (personalLearningItems.length) {
+          await saveLearningRecord({
+            client: supabase,
+            learningRow: {
+              company_id: activeCompany.id,
+              person_id: learningUserId,
+              data: {
+                learningProgress: learningProgress?.[learningUserId] || {},
+                quizProgress: quizProgress?.[learningUserId] || {},
+                practiceCases: learningPracticeCases.filter((item) => item.learnerId === learningUserId),
+                assignments: learningAssignments.filter((item) => item.learnerId === learningUserId),
+                comments: learningComments.filter((item) => item.learnerId === learningUserId),
+                learningLists: learningLists?.[learningUserId] || {},
+                reports: savedReports.filter((item) => item.createdBy === learningUserId || (!item.createdBy && item.userName === learningUserName)),
+              },
+              updated_at: timestamp,
             },
-            updated_at: timestamp,
-          },
-        });
+          });
+        }
+        if (assignedOrderItems.length) {
+          const changedOrderIds = new Set(assignedOrderItems.map((item) => item.recordId));
+          await saveAssignedOrderChanges({ client: supabase, companyId: activeCompany.id, orders: orders.filter((order) => changedOrderIds.has(order.id)) });
+        }
       } else {
         await saveCompanySnapshot({
           client: supabase,
@@ -1108,6 +1156,8 @@ export default function App() {
           peopleRows: companyPeople.map((person) => personToRow(person, activeCompany.id)),
           orderRows: orders.map((order) => ({ id: order.id, company_id: activeCompany.id, data: order, updated_at: timestamp })),
           deletedOrderIds,
+          absenceRows: planningAbsences.map((absence) => absenceToRow(absence, activeCompany.id)),
+          deletedAbsenceIds,
           snapshotRow: { company_id: activeCompany.id, snapshot, updated_at: timestamp },
         });
       }
@@ -1139,10 +1189,12 @@ export default function App() {
     try {
       const isCustomerAccount = targetRole === "kunde";
       const preserveLocalChanges = !isCustomerAccount && getQueueSummary(syncQueueRef.current).unsynced > 0;
-      const { learningRecord, learningRecordError, snap, portalData, portalErrorMessage, remotePeople, remoteOrders } = await withTimeout((async () => {
+      const { absenceErrorMessage, learningRecord, learningRecordError, remoteAbsences, snap, portalData, portalErrorMessage, remotePeople, remoteOrders } = await withTimeout((async () => {
         let snap = null;
         let portalData = null;
         let portalErrorMessage = "";
+        let remoteAbsences = null;
+        let absenceErrorMessage = "";
         let learningRecord = null;
         let learningRecordError = "";
         if (isCustomerAccount) {
@@ -1161,6 +1213,9 @@ export default function App() {
           const { data, error: ordersError } = await supabase.from("orders").select("*").eq("company_id", companyId).order("updated_at", { ascending: false });
           if (ordersError) throw ordersError;
           remoteOrders = data || [];
+          const { data: absenceRows, error: absenceError } = await supabase.from("company_absences").select("*").eq("company_id", companyId).order("start_date", { ascending: true });
+          if (absenceError) absenceErrorMessage = absenceError.message || "Abwesenheiten konnten nicht geladen werden.";
+          else remoteAbsences = absenceRows || [];
           if (targetPersonId) {
             try {
               const row = await loadLearningRecord({ client: supabase, companyId, personId: targetPersonId });
@@ -1170,7 +1225,7 @@ export default function App() {
             }
           }
         }
-        return { learningRecord, learningRecordError, snap, portalData, portalErrorMessage, remotePeople, remoteOrders };
+        return { absenceErrorMessage, learningRecord, learningRecordError, remoteAbsences, snap, portalData, portalErrorMessage, remotePeople, remoteOrders };
       })());
       if (isCustomerAccount) {
         const ownPeople = (remotePeople || []).filter((person) => person.id === targetPersonId);
@@ -1186,11 +1241,13 @@ export default function App() {
         if (snap?.snapshot) applyRemoteSnapshot(snap.snapshot);
         if (remotePeople?.length) setCompanyPeople(remotePeople.map(rowToPerson));
         if (remoteOrders?.length) setOrders(remoteOrders.map((row) => row.data));
+        if (Array.isArray(remoteAbsences)) setPlanningAbsences(remoteAbsences.map(rowToAbsence));
         if (learningRecord && targetPersonId) applyPersonalLearningRecord(targetPersonId, learningRecord);
       } else {
         addSyncLog("Lokale Änderungen vor Cloud-Stand priorisiert");
       }
       if (learningRecordError) addSyncLog(`Persönlicher Lern-Sync nicht verfügbar: ${learningRecordError}`, "fehler");
+      if (absenceErrorMessage) addSyncLog(`Planungs-Sync nicht verfügbar: ${absenceErrorMessage}`, "fehler");
       if (!preserveLocalChanges) setLastSyncedAt(new Date().toISOString());
       setSyncError(portalErrorMessage ? "Kundenportal konnte nicht sicher aus der Cloud geladen werden. Supabase-Schema aktualisieren." : "");
       addSyncLog("Supabase geladen");
@@ -1447,6 +1504,51 @@ export default function App() {
     updateSelectedOrder({ assignedMemberIds: nextIds, assignedTo: names }, { immediate: true, action: "Teamzuweisung geändert" });
     appendOrderEvent(selectedOrder.id, `${person?.name || "Teammitglied"} ${nextIds.includes(personId) ? "zugewiesen" : "aus der Zuweisung entfernt"}`);
   };
+  const updatePlanningOrder = (orderId, changes, action = "Baustellenplanung geändert") => {
+    if (!["dev", "meister", "buero"].includes(appRole)) { showNotice("Diese Planungsänderung ist nur für Büro, Meister oder Dev freigegeben."); return; }
+    const stamp = new Date().toISOString();
+    setOrders((list) => list.map((order) => order.id === orderId ? {
+      ...order,
+      ...changes,
+      planningRevision: Number(order.planningRevision || 0) + 1,
+      planningUpdatedAt: stamp,
+      updatedAt: stamp,
+      statusHistory: [...(order.statusHistory || []), { status: changes.status || order.status, at: stamp, by: authUser?.name || "Planung", note: action }],
+    } : order));
+    addToSyncQueue(action, { orderId, recordId: orderId, changeKeys: Object.keys(changes), baseRevision: Number(orders.find((order) => order.id === orderId)?.planningRevision || 0) }, { type: "planning", recordId: orderId, immediate: true });
+    showNotice(offline ? "Planung lokal gespeichert. Änderung wartet auf Synchronisierung." : "Planung wurde gespeichert.");
+  };
+  const startPlanningOrder = (order) => {
+    if (!order || !["dev", "meister", "buero", "vorarbeiter", "monteur"].includes(appRole)) return;
+    if (!window.confirm(`Auftrag ${order.id} jetzt starten?`)) return;
+    const stamp = new Date().toISOString();
+    setOrders((list) => list.map((item) => item.id === order.id ? { ...item, status: "In Arbeit", startedAt: stamp, updatedAt: stamp, statusHistory: [...(item.statusHistory || []), { status: "In Arbeit", at: stamp, by: authUser?.name || "Montage", note: "Auftrag manuell gestartet" }] } : item));
+    addToSyncQueue("Auftrag gestartet", { orderId: order.id, recordId: order.id, status: "In Arbeit" }, { type: "order", recordId: order.id, immediate: true });
+    showNotice(offline ? "Auftrag lokal gestartet. Änderung wartet auf Synchronisierung." : "Auftrag wurde gestartet.");
+  };
+  const createPlanningAbsenceEntry = (values) => {
+    if (!["dev", "meister", "buero"].includes(appRole)) return;
+    const absence = createPlanningAbsence(values, company.id);
+    setPlanningAbsences((current) => [absence, ...(Array.isArray(current) ? current : [])]);
+    addToSyncQueue("Abwesenheit angelegt", { absenceId: absence.id, personId: absence.personId }, { type: "absence", recordId: absence.id, immediate: true });
+    showNotice(offline ? "Abwesenheit lokal gespeichert und zum Sync vorgemerkt." : "Abwesenheit wurde gespeichert.");
+  };
+  const deletePlanningAbsence = (absenceId) => {
+    if (!["dev", "meister", "buero"].includes(appRole)) return;
+    setPlanningAbsences((current) => (Array.isArray(current) ? current : []).filter((absence) => absence.id !== absenceId));
+    addToSyncQueue("Abwesenheit gelöscht", { absenceId }, { type: "absence", recordId: absenceId, immediate: true });
+    showNotice("Abwesenheit wurde entfernt.");
+  };
+  const openPlanningOrder = (order) => {
+    if (!order) return;
+    setSelectedOrderId(order.id);
+    setActive("orders");
+  };
+  const openPlanningOrderArea = (order, target) => {
+    if (!order || !canOpenModule(target)) return;
+    setSelectedOrderId(order.id);
+    setActive(target);
+  };
   const assignCustomerToOrder = (personId) => {
     const customer = companyPeople.find((p) => p.id === personId);
     if (!selectedOrder || !customer) return;
@@ -1458,7 +1560,7 @@ export default function App() {
     addToSyncQueue("Lernfortschritt geändert", { learnerId: personId, progress: Number(progress) });
   };
 
-  const addOrder = (openChecklist = false) => { if (!newOrder.customer.trim()) { showNotice("Bitte mindestens einen Kundennamen eintragen."); return; } const id = `A-${Math.floor(1000 + Math.random() * 9000)}`; const stamp = new Date().toLocaleString("de-DE"); const order = { id, status: "Neu", createdAt: stamp, updatedAt: stamp, statusHistory: [{ status: "Neu", at: stamp, by: authUser?.name || "System", note: "Auftrag erstellt" }], ...newOrder, internalNotes: newOrder.notes || "" }; setOrders((list) => [order, ...list]); setSelectedOrderId(id); setChecks((current) => ({ ...current, [id]: buildEmptyChecklist(newOrder.product, newOrder) })); addToSyncQueue("Auftrag angelegt", { orderId: id }); setNewOrder({ customer: "", contact: "", phone: "", email: "", address: "", date: todayIso(), time: "08:00", assignedTo: "", product: "vorbaurollladen", substrate: "Beton", drive: "Funkmotor", installType: "Renovierung", windCritical: false, priority: "normal", orderType: "Montage", notes: "" }); showNotice("Auftrag wurde gespeichert und als Baustellenakte geöffnet."); if (openChecklist) setActive("checklists"); else setActive("orders"); };
+  const addOrder = (openChecklist = false) => { if (!newOrder.customer.trim()) { showNotice("Bitte mindestens einen Kundennamen eintragen."); return; } const id = `A-${Math.floor(1000 + Math.random() * 9000)}`; const stamp = new Date().toLocaleString("de-DE"); const order = { id, status: "Neu", createdAt: stamp, updatedAt: stamp, statusHistory: [{ status: "Neu", at: stamp, by: authUser?.name || "System", note: "Auftrag erstellt" }], ...newOrder, internalNotes: newOrder.notes || "" }; setOrders((list) => [order, ...list]); setSelectedOrderId(id); setChecks((current) => ({ ...current, [id]: buildEmptyChecklist(newOrder.product, newOrder) })); addToSyncQueue("Auftrag angelegt", { orderId: id }); setNewOrder({ customer: "", contact: "", phone: "", email: "", address: "", date: todayIso(), time: "08:00", assignedTo: "", product: "vorbaurollladen", substrate: "Beton", drive: "Funkmotor", installType: "Renovierung", windCritical: false, priority: "normal", materialStatus: "nicht geprüft", orderType: "Montage", notes: "" }); showNotice("Auftrag wurde gespeichert und als Baustellenakte geöffnet."); if (openChecklist) setActive("checklists"); else setActive("orders"); };
   const updateSelectedOrder = (changes, options = {}) => { if (!selectedOrder) return; setOrders((list) => list.map((order) => order.id === selectedOrder.id ? { ...order, ...changes, updatedAt: new Date().toLocaleString("de-DE") } : order)); if (options.immediate) addToSyncQueue(options.action || "Auftrag geändert", { orderId: selectedOrder.id, changes: Object.keys(changes) }, { immediate: true }); };
   const updateSelectedOrderStatus = (status, note = "Status geändert") => { if (!selectedOrder) return; const stamp = new Date().toLocaleString("de-DE"); setOrders((list) => list.map((order) => order.id === selectedOrder.id ? { ...order, status, updatedAt: stamp, statusHistory: [...(order.statusHistory || []), { status, at: stamp, by: authUser?.name || "System", note }] } : order)); addToSyncQueue("Status geändert", { orderId: selectedOrder.id, status }); showNotice(`Status geändert: ${status}`); };
   const updateSelectedOrderProduct = (productId) => { if (!selectedOrder) return; setOrders((list) => list.map((order) => order.id === selectedOrder.id ? { ...order, product: productId, updatedAt: new Date().toLocaleString("de-DE") } : order)); setChecks((current) => ({ ...current, [selectedOrder.id]: buildEmptyChecklist(productId, { ...selectedOrder, product: productId }) })); addToSyncQueue("Produkt/Checkliste geändert", { orderId: selectedOrder.id, productId }); showNotice("Produkt geändert und passende Checkliste neu geladen."); };
@@ -1586,7 +1688,7 @@ Kopie/Nachfolgeauftrag aus ${selectedOrder.id}`.trim(), statusHistory: [{ status
     addToSyncQueue("Auftrag wartet auf Material", { orderId, status: "Wartet auf Material" }, { immediate: true });
     showNotice("Auftrag wurde auf „Wartet auf Material“ gesetzt.");
   };
-  const createSnapshot = () => ({ version: "2.3-learning-system", exportedAt: new Date().toISOString(), authUser, company, companyPeople, orders, checks, notes, savedReports, measurementValues, manualQuality, photos, photoAnalyses, pdfDocuments, moduleChecks, partRequests, learningProgress, quizProgress, learningPracticeCases, learningAssignments, learningComments, learningLists, sketchImage, savedSketches, manufacturerFavorites, motorFavorites, technicalRecents, technicalNotes, diagnosisFavorites, diagnosisRecents, diagnosisSessions });
+  const createSnapshot = () => ({ version: "2.4-planning-system", exportedAt: new Date().toISOString(), authUser, company, companyPeople, planningAbsences, orders, checks, notes, savedReports, measurementValues, manualQuality, photos, photoAnalyses, pdfDocuments, moduleChecks, partRequests, learningProgress, quizProgress, learningPracticeCases, learningAssignments, learningComments, learningLists, sketchImage, savedSketches, manufacturerFavorites, motorFavorites, technicalRecents, technicalNotes, diagnosisFavorites, diagnosisRecents, diagnosisSessions });
     const pushToCloud = () => { const snapshot = createSnapshot(); saveJson(`rs-cloud-${cloudCompanyId}`, snapshot); setBackupText(JSON.stringify(snapshot, null, 2)); addSyncLog("Daten im lokalen Cloud-Snapshot gespeichert"); };
   const pullFromCloud = () => { const snapshot = loadJson(`rs-cloud-${cloudCompanyId}`, null); if (!snapshot) { addSyncLog("Kein lokaler Cloud-Snapshot gefunden", "fehlt"); return; } applyRemoteSnapshot(snapshot); updateSyncQueue(() => restoreSyncQueue(snapshot.syncQueue || [])); addSyncLog("Daten aus lokalem Cloud-Snapshot geladen"); };
   const exportBackup = () => { const text = JSON.stringify(createSnapshot(), null, 2); setBackupText(text); addSyncLog("Backup erzeugt"); };
@@ -1643,7 +1745,7 @@ Kopie/Nachfolgeauftrag aus ${selectedOrder.id}`.trim(), statusHistory: [{ status
   }, [authUser?.id, authUser?.companyId, offline]);
 
   const syncOwnerKey = authUser ? `${authUser.id}:${authUser.companyId || company.id}` : "";
-  const syncChangeToken = useMemo(() => ({}), [company, companyPeople, orders, checks, notes, savedReports, measurementValues, manualQuality, photos, photoAnalyses, pdfDocuments, moduleChecks, partRequests, learningProgress, quizProgress, learningPracticeCases, learningAssignments, learningComments, learningLists, sketchImage, savedSketches, manufacturerFavorites, motorFavorites, technicalRecents, technicalNotes, diagnosisFavorites, diagnosisRecents, diagnosisSessions]);
+  const syncChangeToken = useMemo(() => ({}), [company, companyPeople, planningAbsences, orders, checks, notes, savedReports, measurementValues, manualQuality, photos, photoAnalyses, pdfDocuments, moduleChecks, partRequests, learningProgress, quizProgress, learningPracticeCases, learningAssignments, learningComments, learningLists, sketchImage, savedSketches, manufacturerFavorites, motorFavorites, technicalRecents, technicalNotes, diagnosisFavorites, diagnosisRecents, diagnosisSessions]);
   useAutoSync({
     ownerKey: syncOwnerKey,
     ready: initialCloudLoaded,
@@ -1769,8 +1871,8 @@ Kopie/Nachfolgeauftrag aus ${selectedOrder.id}`.trim(), statusHistory: [{ status
         <Header role={appRole} orders={visibleOrders} selectedOrder={selectedOrder} compact={device.isMobile} moduleCount={visibleNavigationItems.length} />
         <QuickAccessBar favorites={navigationFavorites} items={visibleNavigationItems} onNavigate={navigateTo} onToggleFavorite={toggleNavigationFavorite} />
         {device.isMobile && <MobileBottomNav active={active} favorites={navigationFavorites} groups={roleNavigationGroups} items={mobilePrimaryItems} onLogout={logoutSupabase} onNavigate={navigateTo} onToggleFavorite={toggleNavigationFavorite} status={navigationStatus} />}
-    {active === "dashboard" && screen(<DashboardPage activeOrders={activeOrders} allowedNav={visibleNavigationItems} appRole={appRole} canOpenModule={canOpenModule} company={company} learningDashboard={learningDashboard} openReports={openReports} orders={orders} photos={photos} roleHome={roleHome} setActive={navigateTo} setSelectedOrderId={setSelectedOrderId} todaysOrders={todaysOrders} visibleOrders={visibleOrders} />)}
-    {active === "today" && screen(<div className="grid gap-5 lg:grid-cols-[1fr_0.8fr]"><Card><SectionTitle icon={ClipboardList} title="Heute / Tagesplanung" subtitle="Heutige Aufträge, offene Berichte und Schnellaktionen." /><div className="grid gap-3 md:grid-cols-3"><div className="rounded-3xl bg-slate-50 p-4"><p className="text-3xl font-black">{todaysOrders.length}</p><p className="text-sm text-slate-600">heutige Aufträge</p></div><div className="rounded-3xl bg-slate-50 p-4"><p className="text-3xl font-black">{openReports.length}</p><p className="text-sm text-slate-600">offene Berichte</p></div><div className="rounded-3xl bg-slate-50 p-4"><p className="text-3xl font-black">{Object.keys(photos).length}</p><p className="text-sm text-slate-600">Fotos</p></div></div><div className="mt-5 space-y-3">{todaysOrders.length === 0 && <div className="rounded-2xl bg-slate-50 p-4 text-sm font-bold text-slate-600">Heute sind noch keine Aufträge geplant.</div>}{todaysOrders.map((o) => <button key={o.id} onClick={() => { setSelectedOrderId(o.id); setActive("orders"); }} className="w-full rounded-3xl bg-slate-50 p-4 text-left hover:bg-white hover:shadow-md"><div className="flex items-center justify-between"><strong>{o.time} · {o.customer}</strong><Badge>{o.status}</Badge></div><p className="mt-1 text-sm text-slate-600">{o.address}</p><div className="mt-2 flex flex-wrap gap-2"><Badge>{productTypes.find((p) => p.id === o.product)?.name}</Badge><Badge>{o.assignedTo || "ohne Monteur"}</Badge></div></button>)}</div></Card><Card><SectionTitle icon={CheckCircle2} title="Schnellprüfung" subtitle="Was heute offen sein könnte." /><div className="space-y-3">{["Aufträge mit Status offen prüfen", "Checklisten vor Ort abhaken", "Vorher-/Nachher-Fotos ergänzen", "Berichtsheft am Tagesende speichern", "Kundennachricht bei Verzögerung senden"].map((item) => <div key={item} className="rounded-2xl bg-slate-50 p-4 text-sm font-bold">{item}</div>)}</div></Card></div>)}
+    {active === "dashboard" && screen(<DashboardPage activeOrders={activeOrders} allowedNav={visibleNavigationItems} appRole={appRole} canOpenModule={canOpenModule} company={company} learningDashboard={learningDashboard} openReports={openReports} orders={orders} photos={photos} planningSummary={planningSummary} roleHome={roleHome} setActive={navigateTo} setSelectedOrderId={setSelectedOrderId} todaysOrders={todaysOrders} visibleOrders={visibleOrders} />)}
+    {active === "today" && screen(<PlanningPage absences={planningAbsences} appRole={appRole} currentPerson={currentPerson} initialTab="today" offline={offline} onCreateAbsence={createPlanningAbsenceEntry} onCreateLearningCase={createLearningPracticeCaseFromOrder} onDeleteAbsence={deletePlanningAbsence} onOpenOrder={openPlanningOrder} onOpenOrderArea={openPlanningOrderArea} onStartOrder={startPlanningOrder} onUpdateOrder={updatePlanningOrder} orders={orders} partRequests={partRequests} pendingOrderIds={pendingPlanningOrderIds} people={companyPeople} todayOnly />)}
     {active === "orders" && screen(<OrdersPage addOrder={addOrder} canCreate={canManageOrders} canManage={canManageOrders} deleteSelectedOrder={deleteSelectedOrder} detailProps={orderDetailProps} filteredOrders={filteredOrders} newOrder={newOrder} newOrderChecklistPreview={newOrderChecklistPreview} newOrderProduct={newOrderProduct} orderOpenCounts={orderOpenCounts} orderSearch={orderSearch} selectedOrder={selectedOrder} selectedOrderId={selectedOrderId} setNewOrder={setNewOrder} setOrderSearch={setOrderSearch} setSelectedOrderId={setSelectedOrderId} />)}
     {active === "workflow" && screen(<WorkflowPage archiveSelectedOrder={archiveSelectedOrder} canOpenModule={canOpenModule} createOrderFromWorkflowTemplate={createOrderFromWorkflowTemplate} createReworkOrder={createReworkOrder} currentOrderHistory={currentOrderHistory} duplicateSelectedOrder={duplicateSelectedOrder} orderWorkflowTemplates={orderWorkflowTemplates} selectedOrder={selectedOrder} selectedProduct={selectedProduct} selectedWorkflowTemplate={selectedWorkflowTemplate} setActive={setActive} setWorkflowTemplateId={setWorkflowTemplateId} workflowStages={workflowStages} workflowTemplateId={workflowTemplateId} />)}
     {active === "closeOrder" && screen(<CloseOrderPage closeReady={closeReady} closingGroups={closingGroups} closingValues={closingValues} completionNote={selectedOrder?.completionNote || ""} completeSelectedOrder={completeSelectedOrder} createReworkOrder={() => createReworkOrder({ keepSourceSelected: true })} missingClosingItems={unresolvedQuality} openArea={setActive} selectedChecklistProgress={selectedChecklistProgress} selectedOrder={selectedOrder} selectedProduct={selectedProduct} setQualityValue={setQualityValue} startPartRequest={startPartRequestForSelectedOrder} toggleQuality={toggleQuality} updateCompletionNote={(value) => updateSelectedOrder({ completionNote: value })} />)}
@@ -1796,7 +1898,7 @@ Kopie/Nachfolgeauftrag aus ${selectedOrder.id}`.trim(), statusHistory: [{ status
     {(active === "pdf" || active === "documents") && screen(<PdfExportPage currentPdfTemplate={currentPdfTemplate} getPdfValue={getPdfValue} pdfDocuments={pdfDocuments} pdfFileName={pdfFileName} pdfPreviewLines={pdfPreviewLines} pdfTarget={pdfTarget} pdfTemplateDefinitions={pdfTemplateDefinitions} resetPdfTemplate={resetPdfTemplate} savePdfDocument={savePdfDocument} selectedOrder={selectedOrder} selectedProduct={selectedProduct} setPdfField={setPdfField} setPdfTarget={setPdfTarget} updatePdfDocumentStatus={updatePdfDocumentStatus} />)}
     {active === "rights" && screen(<RightsPage navItems={navigationItems} />)}
   {active === "company" && screen(<CompanyTeamPage canManage={canViewLearningTeam} company={company} companyPeople={companyPeople} createCompanyPerson={createCompanyPerson} onArchivePerson={archivePerson} onRegenerateCode={regeneratePersonCode} onSetPersonStatus={setPersonStatus} onUpdatePerson={updateCompanyPerson} orders={orders} personForm={personForm} personRoleLabel={personRoleLabel} setCompany={setCompany} setPersonForm={setPersonForm} showNotice={showNotice} teamRoleOptions={teamRoleOptions} updateAzubiProgress={updateAzubiProgress} />)}
-  {active === "planning" && screen(<div className="grid gap-5 lg:grid-cols-[0.9fr_1.1fr]"><Card><SectionTitle icon={BriefcaseBusiness} title="Baustellenplanung" subtitle="Aufträge werden Vorarbeitern, Monteuren, Azubis und Kunden zugewiesen. Danach sehen Code-Logins nur ihre passenden Baustellen." /><div className="space-y-3">{orders.map((o) => <button key={o.id} onClick={() => setSelectedOrderId(o.id)} className={`w-full rounded-3xl border p-4 text-left ${selectedOrder?.id === o.id ? "border-slate-950 bg-white shadow-md" : "border-slate-100 bg-slate-50"}`}><div className="flex items-center justify-between"><strong>{o.date} {o.time} · {o.customer}</strong><Badge>{o.status}</Badge></div><p className="mt-1 text-sm text-slate-600">{o.address}</p><p className="mt-2 text-xs font-bold text-slate-500">Team: {(o.assignedMemberIds || []).map((id) => companyPeople.find((p) => p.id === id)?.name).filter(Boolean).join(", ") || o.assignedTo || "noch niemand"}</p></button>)}</div></Card><Card><SectionTitle icon={UserRound} title="Zuweisung für aktiven Auftrag" subtitle="Wähle Teammitglieder und Kunden aus dem Firmenverzeichnis." /><div className="mb-4 rounded-3xl bg-slate-50 p-4"><h3 className="font-black">{selectedOrder?.id} · {selectedOrder?.customer}</h3><p className="mt-1 text-sm text-slate-600">{selectedProduct.name} · {selectedOrder?.date} {selectedOrder?.time}</p></div><p className="mb-2 text-xs font-bold uppercase text-slate-500">Team zuweisen</p><div className="space-y-2">{teamMembers.map((p) => <label key={p.id} className="flex items-center justify-between gap-3 rounded-2xl bg-slate-50 p-3 text-sm font-bold"><span>{p.name} · {personRoleLabel(p.role)}</span><input type="checkbox" checked={(selectedOrder?.assignedMemberIds || []).includes(p.id)} onChange={() => toggleAssignment(p.id)} className="h-5 w-5 accent-slate-950" /></label>)}</div><p className="mb-2 mt-5 text-xs font-bold uppercase text-slate-500">Kunde zuweisen</p><div className="space-y-2">{companyCustomers.map((p) => <button key={p.id} onClick={() => assignCustomerToOrder(p.id)} className={`w-full rounded-2xl p-3 text-left text-sm font-bold ${selectedOrder?.customerPersonId === p.id ? "bg-slate-950 text-white" : "bg-slate-50"}`}>{p.name} · {p.status} · {p.address || "ohne Adresse"}</button>)}</div></Card></div>)}
+  {active === "planning" && screen(<PlanningPage absences={planningAbsences} appRole={appRole} currentPerson={currentPerson} offline={offline} onCreateAbsence={createPlanningAbsenceEntry} onCreateLearningCase={createLearningPracticeCaseFromOrder} onDeleteAbsence={deletePlanningAbsence} onOpenOrder={openPlanningOrder} onOpenOrderArea={openPlanningOrderArea} onStartOrder={startPlanningOrder} onUpdateOrder={updatePlanningOrder} orders={orders} partRequests={partRequests} pendingOrderIds={pendingPlanningOrderIds} people={companyPeople} />)}
     {(["portal", "customerDocuments", "customerCare", "customerContact"].includes(active)) && screen(<CustomerPortalPage currentCustomerOrders={currentCustomerOrders} customerDocuments={currentCustomerDocuments} confirmCustomerAppointment={confirmCustomerAppointment} openCustomerOrder={openCustomerOrder} initialSection={active} />)}
   {active === "azubiPlan" && screen(<div className="space-y-5">
     <Card><SectionTitle icon={GraduationCap} title="Azubi-Lernplan" subtitle="Lernmodule nach Ausbildungsjahr, Fortschritt und nächster Aufgabe." />

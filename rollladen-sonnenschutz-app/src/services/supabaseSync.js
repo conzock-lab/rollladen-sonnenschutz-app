@@ -12,6 +12,8 @@ export async function saveCompanySnapshot({
   peopleRows,
   orderRows,
   deletedOrderIds = [],
+  absenceRows = [],
+  deletedAbsenceIds = [],
   snapshotRow,
   timeoutMs = 15000,
 }) {
@@ -40,9 +42,41 @@ export async function saveCompanySnapshot({
       if (deleteError) throw deleteError;
     }
 
+    if (absenceRows.length) {
+      const { error: absenceError } = await client.from("company_absences").upsert(absenceRows);
+      if (absenceError) throw absenceError;
+    }
+
+    if (deletedAbsenceIds.length) {
+      const { error: deleteAbsenceError } = await client.from("company_absences").delete().eq("company_id", companyRow.id).in("id", deletedAbsenceIds);
+      if (deleteAbsenceError) throw deleteAbsenceError;
+    }
+
     const { error: snapshotError } = await client.from("app_snapshots").upsert({ ...snapshotRow, updated_by: authData.user.id });
     if (snapshotError) throw snapshotError;
 
+    return { user: authData.user };
+  })(), timeoutMs);
+}
+
+export async function saveAssignedOrderChanges({ client, companyId, orders, timeoutMs = 15000 }) {
+  if (!client) throw new Error("Supabase ist nicht konfiguriert.");
+  return withTimeout((async () => {
+    const { data: authData, error: authError } = await client.auth.getUser();
+    if (authError) throw authError;
+    if (!authData?.user) throw new Error("Keine gültige Cloud-Sitzung gefunden.");
+    for (const order of orders) {
+      const patch = {
+        status: order.status,
+        statusHistory: order.statusHistory || [],
+        startedAt: order.startedAt || null,
+        technicianNote: order.technicianNote || null,
+        planningNote: order.planningNote || null,
+        updatedAt: order.updatedAt || new Date().toISOString(),
+      };
+      const { error } = await client.rpc("update_assigned_order_work", { p_company_id: companyId, p_order_id: order.id, p_patch: patch });
+      if (error) throw error;
+    }
     return { user: authData.user };
   })(), timeoutMs);
 }
