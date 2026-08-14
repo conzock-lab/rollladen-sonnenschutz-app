@@ -1,6 +1,17 @@
 import { useEffect, useRef } from "react";
 
-export default function useAutoSync({ ownerKey, ready, enabled, offline, pendingVersion, changeToken, onLocalChange, onSync }) {
+export default function useAutoSync({
+  ownerKey,
+  ready,
+  enabled,
+  offline,
+  pendingVersion,
+  syncDelay = 1200,
+  changeToken,
+  onLocalChange,
+  onSync,
+  localChangeDebounceMs = 1000,
+}) {
   const trackedOwnerRef = useRef("");
   const localChangeRef = useRef(onLocalChange);
   const syncRef = useRef(onSync);
@@ -11,18 +22,19 @@ export default function useAutoSync({ ownerKey, ready, enabled, offline, pending
   useEffect(() => {
     if (!ownerKey || !ready || !enabled) {
       trackedOwnerRef.current = "";
-      return;
+      return undefined;
     }
     if (trackedOwnerRef.current !== ownerKey) {
       trackedOwnerRef.current = ownerKey;
-      return;
+      return undefined;
     }
-    localChangeRef.current?.();
-  }, [ownerKey, ready, enabled, changeToken]);
+    const timeoutId = window.setTimeout(() => localChangeRef.current?.(), localChangeDebounceMs);
+    return () => window.clearTimeout(timeoutId);
+  }, [ownerKey, ready, enabled, changeToken, localChangeDebounceMs]);
 
   useEffect(() => {
-    if (!ownerKey || !ready || !enabled || offline || pendingVersion === 0) return;
-    const timeoutId = window.setTimeout(() => syncRef.current?.(), 4500);
+    if (!ownerKey || !ready || !enabled || offline || !pendingVersion) return undefined;
+    const timeoutId = window.setTimeout(() => syncRef.current?.(), Math.max(0, syncDelay));
     return () => window.clearTimeout(timeoutId);
-  }, [ownerKey, ready, enabled, offline, pendingVersion]);
+  }, [ownerKey, ready, enabled, offline, pendingVersion, syncDelay]);
 }

@@ -1,91 +1,85 @@
 const shadeProducts = ["vorbaurollladen", "aufsatzrollladen", "markise", "raffstore", "zipscreen", "screen_offen", "terrassendach", "pergola"];
 
+export const motorInspectionSteps = [
+  "Produkt identifiziert",
+  "Hersteller identifiziert",
+  "Motortyp identifiziert",
+  "Typenschild geprüft",
+  "Spannungsversorgung fachgerecht geprüft",
+  "Bedienung geprüft",
+  "Endlagen geprüft",
+  "Steuerung geprüft",
+  "Sensorik geprüft, falls vorhanden",
+  "Funktionstest durchgeführt und dokumentiert",
+];
+
+export const radioCheckSteps = [
+  "Sender reagiert",
+  "Batterie geprüft",
+  "Richtiger Kanal gewählt",
+  "Lokaler Taster oder Einzelsender geprüft",
+  "Versorgung des Empfängers fachgerecht geprüft",
+  "Funkreichweite plausibel",
+  "Anderen kompatiblen Sender geprüft, falls vorhanden",
+  "Programmierzustand nur nach Herstellerunterlage geprüft",
+];
+
+export const controlGroups = [
+  { id: "controls", title: "Bedienelemente", items: ["Taster", "Schalter", "Schlüsselschalter", "Handsender", "Wandsender"], note: "Verriegelung, Kanal, Beschriftung und tatsächliche Anlagenzuordnung prüfen." },
+  { id: "control-systems", title: "Steuerungen", items: ["Externer Funkempfänger", "Gruppensteuerung", "Zeitschaltsteuerung", "Zentralsteuerung", "Rolltorsteuerung"], note: "Vor Änderungen vorhandene Gruppen, Prioritäten und Sicherheitsfunktionen dokumentieren." },
+  { id: "sensors", title: "Sensorik", items: ["Wind", "Sonne", "Regen", "Temperatur/Frost", "Helligkeit"], note: "Montageort, Versorgung und Reaktion nur im Rahmen der konkreten Herstellerunterlage prüfen." },
+  { id: "smart-home", title: "Smart Home", items: ["Gateway", "App-Steuerung", "Szenen", "Gruppen"], note: "Lokale Bedienung zuerst sicherstellen; Konten oder Zugangsdaten nicht in Aufträgen speichern." },
+];
+
+export const motorAssistantQuestions = [
+  { id: "reacts", label: "Motor reagiert überhaupt?", options: ["Ja", "Nein"] },
+  { id: "supply", label: "Spannungsversorgung fachgerecht geprüft?", options: ["Ja", "Nein", "Nicht geprüft"] },
+  { id: "hums", label: "Motor brummt?", options: ["Ja", "Nein"] },
+  { id: "oneDirection", label: "Fährt nur eine Richtung?", options: ["Ja", "Nein"] },
+  { id: "limits", label: "Endlagen korrekt?", options: ["Ja", "Nein", "Unklar"] },
+  { id: "radio", label: "Funksteuerung vorhanden?", options: ["Ja", "Nein", "Unklar"] },
+];
+
+function motor(entry) {
+  return {
+    operation: "Bedienung und Anlagenzuordnung vor Eingriff praktisch prüfen.",
+    connections: "Anschlussart nur anhand Schaltbild und Typenschild bestimmen; elektrische Prüfungen gehören zur entsprechend qualifizierten Person.",
+    endLimit: "Endlagenart modellabhängig feststellen.",
+    programming: "Herstelleranleitung und konkreten Motortyp prüfen; keine universelle Resetfolge verwenden.",
+    tools: ["Typenschildfoto", "Herstellerunterlage", "geeignetes Prüfmittel", "Einstellwerkzeug modellabhängig"],
+    safetyNotes: ["Anlage gegen unbeabsichtigte Bewegung sichern", "Elektrische Arbeiten nur entsprechend Qualifikation und geltenden Vorschriften"],
+    diagnosisIds: ["motor-faehrt-nicht", "motor-brummt", "motor-eine-richtung"],
+    partCategories: ["Motor", "Adapter / Mitnehmer", "Bedienelement / Steuerung"],
+    ...entry,
+  };
+}
+
 export const motorTypes = [
-  {
-    id: "mechanisch",
-    name: "Mechanischer Rohrmotor",
-    productIds: ["vorbaurollladen", "aufsatzrollladen", "markise"],
-    details: "Robuste Bauart mit mechanisch eingestellten Endlagen. Vor dem Einstellen immer Laufweg, Welle, Adapter und Drehrichtung prüfen.",
-    checks: ["Typenschild und Drehmomentbereich erfassen", "Welle, Adapter und Mitnehmer prüfen", "Drehrichtung kontrollieren", "Untere Endlage mit Reserve einstellen", "Obere Endlage ohne Anschlagen einstellen", "Mehrere vollständige Probefahrten durchführen"],
-    mistakes: ["Endlage gegen Anschlag gefahren", "Adapter oder Mitnehmer hat Spiel", "Auf und Ab vertauscht", "Mechanische Schwergängigkeit übersehen"],
-  },
-  {
-    id: "elektronisch",
-    name: "Elektronischer Rohrmotor",
-    productIds: ["vorbaurollladen", "aufsatzrollladen", "markise", "raffstore", "zipscreen"],
-    details: "Endlagen und Schutzfunktionen werden je nach Modell elektronisch gelernt. Lernablauf nie aus einer anderen Serie übernehmen.",
-    checks: ["Hersteller, Serie und Lernart bestimmen", "Anlage mechanisch freigängig prüfen", "Einzellernfahrt vorbereiten", "Endlagen nach Anleitung speichern", "Hindernis- oder Festfrierschutz praxisnah testen", "Einstellungen im Auftrag dokumentieren"],
-    mistakes: ["Falsche Lernsequenz verwendet", "Mehrere Motoren gleichzeitig im Lernmodus", "Schwergängigkeit als Endlage gelernt", "Schutzfunktion ungeprüft vorausgesetzt"],
-  },
-  {
-    id: "funkmotor",
-    name: "Funkmotor",
-    productIds: shadeProducts,
-    details: "Motor mit integriertem Empfänger für Hand-, Wand- oder Zentralsender. Kanal und Anlage vor jeder Programmierung eindeutig zuordnen.",
-    checks: ["Funkfamilie und Motortyp erfassen", "Nur Zielmotor in Lernbereitschaft bringen", "Senderkanal auswählen und beschriften", "Drehrichtung und Endlagen prüfen", "Reichweite an realen Bedienorten testen", "Gruppen- und Einzelbedienung erklären"],
-    mistakes: ["Falschen Kanal programmiert", "Nachbarmotor unbeabsichtigt gekoppelt", "Senderbatterie nicht geprüft", "Reset ohne Sicherung bestehender Zuordnungen"],
-  },
-  {
-    id: "kabelmotor",
-    name: "Tastermotor / Kabelmotor",
-    productIds: shadeProducts,
-    details: "Klassischer Auf-/Ab-Antrieb über verriegelten Taster, Relais oder Steuerung. Netzanschluss und Messungen gehören zur Elektrofachkraft.",
-    checks: ["Anschlussart und Schaltbild prüfen", "Verriegelung von Auf und Ab klären", "Zugentlastung und Leitungsweg ansehen", "Drehrichtung testen", "Endlagen kontrollieren", "Bedienstelle eindeutig beschriften"],
-    mistakes: ["Auf und Ab gleichzeitig angesteuert", "Leiter vertauscht", "Ungeeigneter Taster verwendet", "Netzarbeit ohne Elektrofachkraft"],
-    safety: true,
-  },
-  {
-    id: "solarmotor",
-    name: "Solarmotor",
-    productIds: ["vorbaurollladen", "zipscreen", "screen_offen"],
-    details: "Nachrüstlösung mit Akku und Solarpanel. Verschattung, Ladezustand und Leitungsführung entscheiden über zuverlässigen Betrieb.",
-    checks: ["Akkuzustand und Steckverbindungen prüfen", "Panel ohne dauerhafte Verschattung positionieren", "Leitung scheuerfrei verlegen", "Motor und Sender zuordnen", "Endlagen testen", "Hinweis zu Ladezeit und Winterbetrieb geben"],
-    mistakes: ["Panel im Schatten montiert", "Akku vor Lernfahrt zu schwach", "Stecker nicht verriegelt", "Kabel im Revisionsweg geführt"],
-  },
-  {
-    id: "funkempfaenger",
-    name: "Externer Funkempfänger",
-    productIds: shadeProducts,
-    details: "Empfänger zwischen Steuerung und Kabelmotor. Einbauort, Versorgung, Antennenlage und Schaltleistung müssen zum System passen.",
-    checks: ["Empfänger und Motor elektrisch zuordnen", "Versorgung und Ausgänge prüfen lassen", "Trockenen zugänglichen Einbauort wählen", "Antenne nicht abschirmen", "Senderkanal und Fahrtrichtung testen", "Dose oder Kasten beschriften"],
-    mistakes: ["Falsche Versorgung vorausgesetzt", "Antenne hinter Metall abgeschirmt", "Einbauort nicht revisionsfähig", "Motorlast oder Schaltart nicht geprüft"],
-    safety: true,
-  },
-  {
-    id: "sensorik",
-    name: "Wind-/Sonnensensor",
-    productIds: ["markise", "raffstore", "zipscreen", "screen_offen", "pergola", "terrassendach"],
-    details: "Sensorik steuert Komfort und Schutzreaktionen, ersetzt aber keine zulässige Produktauswahl. Montageort und Vorranglogik praktisch testen.",
-    checks: ["Passende Systemfamilie prüfen", "Montageort frei von Windschatten wählen", "Versorgung oder Batterie kontrollieren", "Grenzwerte nur nach Herstellerangabe setzen", "Schutzfahrt und Sperrzeit testen", "Handbetrieb und Automatik erklären"],
-    mistakes: ["Sensor im Windschatten", "Grenzwert ohne Produktdaten gewählt", "Vorrang der Windfunktion unbekannt", "Automatik dem Kunden nicht erklärt"],
-    safety: true,
-  },
-  {
-    id: "gateway",
-    name: "Smart-Home Gateway",
-    productIds: shadeProducts,
-    details: "Verbindet Antriebe mit App, Szenen und Automationen. Erst Einzelbedienung sicherstellen, danach Gateway und Szenen einrichten.",
-    checks: ["Gatewaykonto und Eigentümer klären", "Netzwerkverbindung herstellen", "Jedes Gerät eindeutig benennen", "Einzel- und Gruppenfahrt testen", "Szenen auf Kollisionen prüfen", "Lokale Bedienung bei Ausfall erklären"],
-    mistakes: ["Falsches Kundenkonto verwendet", "Geräte doppelt oder unklar benannt", "Szenen fahren gegeneinander", "Nur App, keine lokale Bedienung erklärt"],
-  },
-  {
-    id: "zentralsteuerung",
-    name: "Zentral- und Gruppensteuerung",
-    productIds: shadeProducts,
-    details: "Mehrere Anlagen werden über Relais, Bus oder Funkgruppen gemeinsam gefahren. Vor Änderungen Gruppenstruktur und Prioritäten aufnehmen.",
-    checks: ["Anlagen und Gruppen skizzieren", "Einzelfahrt vor Gruppenfahrt testen", "Prioritäten von Sensoren klären", "Fahrzeiten und gegenseitige Verriegelung prüfen", "Beschriftung aktualisieren", "Kundenübergabe durchführen"],
-    mistakes: ["Gruppe ohne Bestandsaufnahme geändert", "Sensorpriorität übergangen", "Unterschiedliche Fahrwege ignoriert", "Dokumentation nicht aktualisiert"],
-  },
-  {
-    id: "rolltor",
-    name: "Rolltor-Steuerung",
-    productIds: ["rolltor", "garagentor_antrieb"],
-    details: "Steuerung für Torantrieb, Sicherheitseinrichtungen und Notbedienung. Sicherheitskreise dürfen nicht überbrückt werden.",
-    checks: ["Torlauf mechanisch prüfen", "Lichtschranke und Sicherheitsleiste testen", "Endlagen und Stoppverhalten prüfen", "Notentriegelung praktisch testen", "Warn- und Bedienelemente kontrollieren", "Ergebnis im Prüfprotokoll festhalten"],
-    mistakes: ["Sicherheitseinrichtung überbrückt", "Kraft statt Mechanik korrigiert", "Notbedienung nicht erklärt", "Fehler ohne Protokoll zurückgesetzt"],
-    safety: true,
-  },
+  motor({ id: "mechanisch", category: "Rohrmotoren", name: "Mechanischer Rohrmotor", productIds: ["vorbaurollladen", "aufsatzrollladen", "markise"], useCases: ["Rollladen", "Markise"], details: "Rohrmotor mit mechanisch eingestellten Endlagen. Vor dem Einstellen Laufweg, Welle, Adapter und Drehrichtung prüfen.", operation: "Taster, Schalter oder vorgeschaltete Steuerung; konkrete Ausführung prüfen.", endLimit: "Mechanisch, Einstellung modellabhängig.", failureSymptoms: ["Reagiert nicht", "Brummt", "Fährt nur eine Richtung", "Endlage stimmt nicht"], checks: ["Typenschild und Anwendung erfassen", "Welle, Adapter und Mitnehmer prüfen", "Mechanischen Laufweg freigängig prüfen", "Drehrichtung kontrollieren", "Endlagen ohne Anschlagen prüfen", "Mehrere vollständige Probefahrten durchführen"], mistakes: ["Endlage gegen Anschlag gefahren", "Adapter oder Mitnehmer hat Spiel", "Auf und Ab vertauscht", "Mechanische Schwergängigkeit übersehen"] }),
+  motor({ id: "elektronisch", category: "Rohrmotoren", name: "Elektronischer Rohrmotor", productIds: ["vorbaurollladen", "aufsatzrollladen", "markise", "raffstore", "zipscreen"], useCases: ["Rollladen", "Markise", "Raffstore", "ZIP-Screen"], details: "Endlagen und Schutzfunktionen werden je nach Modell elektronisch gelernt. Lernablauf nie aus einer anderen Serie übernehmen.", endLimit: "Elektronisch oder automatisch, modellabhängig.", failureSymptoms: ["Endlage verloren", "Stoppt vorzeitig", "Fährt nur eine Richtung"], checks: ["Hersteller, Serie und Lernart bestimmen", "Anlage mechanisch freigängig prüfen", "Nur Zielmotor zur Einstellung vorbereiten", "Endlagen nach Anleitung prüfen", "Vorhandene Schutzfunktion nicht ungeprüft voraussetzen", "Einstellungen im Auftrag dokumentieren"], mistakes: ["Falsche Lernsequenz verwendet", "Mehrere Motoren gleichzeitig im Lernmodus", "Schwergängigkeit als Endlage gelernt", "Schutzfunktion ungeprüft vorausgesetzt"] }),
+  motor({ id: "funkmotor", category: "Rohrmotoren", name: "Funkrohrmotor", productIds: shadeProducts, useCases: ["Rollladen", "Markise", "Raffstore", "ZIP-Screen"], details: "Motor mit integriertem Empfänger für Hand-, Wand- oder Zentralsender. Kanal und Anlage vor jeder Programmierung eindeutig zuordnen.", operation: "Handsender, Wandsender, Sensorik oder Gateway abhängig von Funkfamilie.", connections: "Versorgung und Anschluss nach Motorschaltbild; Funk ersetzt keine fachgerechte elektrische Prüfung.", endLimit: "Mechanisch oder elektronisch, je Motorserie.", failureSymptoms: ["Sender reagiert nicht", "Falscher Kanal", "Reichweitenproblem", "Unbeabsichtigte Gruppenfahrt"], checks: ["Funkfamilie und Motortyp erfassen", "Nur Zielmotor in Lernbereitschaft bringen", "Senderkanal auswählen und beschriften", "Drehrichtung und Endlagen prüfen", "Reichweite an realen Bedienorten testen", "Gruppen- und Einzelbedienung erklären"], mistakes: ["Falschen Kanal programmiert", "Nachbarmotor unbeabsichtigt gekoppelt", "Senderbatterie nicht geprüft", "Reset ohne Sicherung bestehender Zuordnungen"], diagnosisIds: ["funk-reagiert-nicht", "sender-verloren", "anlage-faehrt-selbst", "motor-faehrt-nicht"], partCategories: ["Funkmotor", "Hand-/Wandsender", "Empfänger", "Sensorik"] }),
+  motor({ id: "bidirektional", category: "Rohrmotoren", name: "Bidirektionaler Funkmotor", productIds: shadeProducts, useCases: ["Rollladen", "Markise", "Raffstore", "ZIP-Screen"], details: "Funkantrieb mit möglicher Rückmeldung an kompatible Bedienelemente oder Gateways. Rückmeldung und Kompatibilität immer systemabhängig prüfen.", operation: "Kompatibler Sender oder Gateway; Statusanzeige nicht als alleinigen Funktionsnachweis verwenden.", failureSymptoms: ["Befehl wird angezeigt, Anlage fährt nicht", "Status unplausibel", "Gerät im Gateway nicht erreichbar"], checks: ["Funkfamilie und Rückmeldefunktion bestimmen", "Lokale Bedienung testen", "Sender-/Gateway-Zuordnung dokumentieren", "Endlagen praktisch prüfen", "Rückmeldung mit realer Position vergleichen", "Fallback-Bedienung erklären"], mistakes: ["Unidirektionalen und bidirektionalen Funk gemischt", "App-Status ungeprüft übernommen", "Gateway vor lokaler Bedienung zurückgesetzt"], diagnosisIds: ["gateway-offline", "funk-reagiert-nicht", "anlage-faehrt-selbst"], partCategories: ["Bidirektionaler Funkmotor", "Gateway", "Sender", "Empfänger"] }),
+  motor({ id: "solarmotor", category: "Rohrmotoren", name: "Solarmotor", productIds: ["vorbaurollladen", "zipscreen", "screen_offen"], useCases: ["Rollladen", "ZIP-Screen"], details: "Antrieb mit Akku und Solarpanel. Verschattung, Ladezustand und Leitungsführung beeinflussen den Betrieb.", operation: "Funkbedienung systemabhängig; Lade- und Akkuzustand getrennt vom Motorfehler betrachten.", connections: "Kleinspannungs-/Stecksystem modellabhängig; Polarität und Steckverbindung nur nach Unterlage prüfen.", failureSymptoms: ["Keine Reaktion", "Kurze Fahrten", "Funktion nur nach langer Ladezeit"], checks: ["Akkuzustand und Steckverbindungen prüfen", "Panel auf dauerhafte Verschattung prüfen", "Leitung scheuerfrei verlegen", "Motor und Sender zuordnen", "Endlagen testen", "Betrieb und Ladehinweis dokumentieren"], mistakes: ["Panel im Schatten montiert", "Akku vor Lernfahrt zu schwach", "Stecker nicht verriegelt", "Kabel im Revisionsweg geführt"], partCategories: ["Solarmotor", "Akku", "Solarpanel", "Sender"] }),
+  motor({ id: "raffstoremotor", category: "Raffstore", name: "Raffstoremotor", productIds: ["raffstore"], useCases: ["Raffstore"], details: "Antrieb für Heben, Senken und je nach Anlage Wendefunktion. Mechanik, Bänder und Lamellenpaket vor der Einstellung prüfen.", operation: "Taster, Funk- oder Zentralsteuerung modellabhängig.", endLimit: "Mechanisch oder elektronisch; Wendepunkt und obere Abschaltung getrennt betrachten.", failureSymptoms: ["Wendung ungleichmäßig", "Paket stoppt", "Bänder laufen schief"], checks: ["Lamellenpaket und Bänder prüfen", "Motortyp und Kupplung erfassen", "Drehrichtung prüfen", "Hebe-/Senkfahrt testen", "Wendefunktion beobachten", "Windsteuerung und Übergabe dokumentieren"], mistakes: ["Verdrehtes Band über Motor kompensiert", "Wendepunkt mit Endlage verwechselt", "Windautomatik ungeprüft"], diagnosisIds: ["raffstore-wendet-falsch", "raffstore-klappert", "motor-faehrt-nicht"], partCategories: ["Raffstoremotor", "Aufzugsband", "Leiterkordel", "Steuerung"] }),
+  motor({ id: "markisenmotor", category: "Markise", name: "Markisenmotor", productIds: ["markise", "pergola"], useCases: ["Gelenkarmmarkise", "Kassettenmarkise", "Pergola"], details: "Antrieb für Tuchwelle und Ausfall. Gelenkarme, Tuchwicklung, Windautomatik und Endlagen gemeinsam beurteilen.", operation: "Taster, Funk, Gruppen- oder Sensorsteuerung je Ausstattung.", failureSymptoms: ["Stoppt früh", "Schließt nicht sauber", "Reagiert auf Windautomatik"], checks: ["Markise gegen unbeabsichtigte Bewegung sichern", "Arme und Tuchlauf prüfen", "Antrieb und Steuerung identifizieren", "Ein-/Ausfahrt beobachten", "Endlagen nach Unterlage prüfen", "Windhinweis und Sensorik dokumentieren"], mistakes: ["Federspannung unterschätzt", "Mechanischen Schiefstand über Endlage korrigiert", "Windautomatik nicht berücksichtigt"], safetyNotes: ["Gelenkarme stehen unter Federspannung", "Schwere und bewegte Bauteile sichern", "Elektrische Arbeiten nur entsprechend Qualifikation"], diagnosisIds: ["markise-stoppt", "markise-schliesst-schief", "sensorik-falsch"], partCategories: ["Markisenmotor", "Gelenkarm", "Tuch/Welle", "Sensor/Steuerung"] }),
+  motor({ id: "zipscreen-motor", category: "ZIP-Screen", name: "ZIP-Screen-Antrieb", productIds: ["zipscreen", "screen_offen"], useCases: ["ZIP-Screen", "Textilscreen"], details: "Rohrmotor für textilen Behang. Saubere, parallele Führung und Tuchlauf vor Endlageneinstellung sicherstellen.", operation: "Taster, Funk oder Sensorsteuerung modellabhängig.", failureSymptoms: ["Tuch klemmt", "Fährt schief", "Endlage belastet Tuch"], checks: ["Schienen und Einläufe reinigen", "Tuch und ZIP-Keder prüfen", "Motorseite und Welle erfassen", "Drehrichtung testen", "Endlagen mit Laufreserve prüfen", "Windhinweis dokumentieren"], mistakes: ["Klemmende Führung als Endlage gelernt", "Tuch mit Motorkraft aus Führung gezogen", "Schienenabstand nicht verglichen"], diagnosisIds: ["zipscreen-klemmt", "motor-brummt", "sensorik-falsch"], partCategories: ["ZIP-Motor", "Tuch/ZIP-Keder", "Führung", "Endleiste"] }),
+  motor({ id: "funkempfaenger", category: "Steuerungen", name: "Externer Funkempfänger", productIds: shadeProducts, useCases: ["Nachrüstung eines Kabelmotors"], details: "Empfänger zwischen Bedienstelle und Kabelmotor. Einbauort, Versorgung, Funkfamilie und Schaltart müssen zum System passen.", operation: "Passender Funk- oder Wandsender.", failureSymptoms: ["Keine Funkreaktion", "Lokaler Taster funktioniert", "Reichweite gering"], checks: ["Empfänger und Motor eindeutig zuordnen", "Versorgung fachgerecht prüfen", "Zugänglichen Einbauort dokumentieren", "Antennenlage prüfen", "Senderkanal und Fahrtrichtung testen", "Dose oder Kasten beschriften"], mistakes: ["Falsche Versorgung vorausgesetzt", "Antenne durch Metall abgeschirmt", "Einbauort nicht revisionsfähig", "Schaltart nicht geprüft"], safety: true, diagnosisIds: ["funk-reagiert-nicht", "motor-eine-richtung"], partCategories: ["Funkempfänger", "Sender", "Taster"] }),
+  motor({ id: "sensorik", category: "Sensorik", name: "Wind-/Sonnen-/Wettersensorik", productIds: ["markise", "raffstore", "zipscreen", "screen_offen", "pergola", "terrassendach"], useCases: ["Komfort- und Schutzautomatik"], details: "Sensorik steuert Automatikreaktionen, ersetzt aber keine passende Produktauswahl. Montageort und Vorranglogik praktisch testen.", operation: "Automatik und Handbetrieb abhängig von Steuerungsfamilie.", failureSymptoms: ["Falsche Schutzfahrt", "Keine Reaktion", "Anlage fährt unerwartet"], checks: ["Passende Systemfamilie prüfen", "Montageort auf Windschatten/Verschattung prüfen", "Versorgung oder Batterie kontrollieren", "Grenzwerte nur nach Herstellerangabe behandeln", "Schutzfahrt und Sperrzeit testen", "Handbetrieb und Automatik erklären"], mistakes: ["Sensor im Windschatten", "Grenzwert ohne Produktdaten gewählt", "Vorrang der Windfunktion unbekannt", "Automatik dem Kunden nicht erklärt"], safety: true, diagnosisIds: ["sensorik-falsch", "anlage-faehrt-selbst"], partCategories: ["Wind-/Sonnensensor", "Wettersensor", "Empfänger/Steuerung"] }),
+  motor({ id: "gateway", category: "Smart Home", name: "Smart-Home Gateway", productIds: shadeProducts, useCases: ["App-Steuerung", "Szenen", "Gruppen"], details: "Verbindet kompatible Antriebe mit App und Automationen. Erst lokale Einzelbedienung sicherstellen, danach Gateway prüfen.", operation: "App, Szenen oder Gruppen; lokale Bedienmöglichkeit erhalten.", connections: "Netzteil und Netzwerk modellabhängig; keine Kundenzugangsdaten im Auftrag speichern.", failureSymptoms: ["Gateway offline", "Gerät fehlt", "Szene fährt unerwartet"], checks: ["Eigentümer/Konto klären", "Lokale Bedienung jedes Geräts testen", "Gatewayversorgung und Netzwerkstatus dokumentieren", "Geräte eindeutig benennen", "Einzel- und Gruppenfahrt testen", "Ausfallbedienung erklären"], mistakes: ["Falsches Kundenkonto verwendet", "Geräte doppelt benannt", "Szenen fahren gegeneinander", "Gateway vorschnell zurückgesetzt"], diagnosisIds: ["gateway-offline", "anlage-faehrt-selbst", "funk-reagiert-nicht"], partCategories: ["Gateway", "Netzteil", "Funkadapter"] }),
+  motor({ id: "zentralsteuerung", category: "Steuerungen", name: "Zentral-/Gruppen-/Zeitsteuerung", productIds: shadeProducts, useCases: ["Mehrere Anlagen", "Zeitprogramme", "Zentralbefehle"], details: "Mehrere Anlagen werden über Relais, Bus oder Funkgruppen gemeinsam gefahren. Gruppenstruktur und Prioritäten vor Änderungen aufnehmen.", operation: "Lokale Bedienstellen, Zentralbefehl, Zeitprogramm oder Sensorik.", failureSymptoms: ["Nur einzelne Gruppe fährt", "Anlage fährt zur falschen Zeit", "Befehle widersprechen sich"], checks: ["Anlagen und Gruppen skizzieren", "Einzelfahrt vor Gruppenfahrt testen", "Zeitprogramme und Sensorprioritäten klären", "Verriegelung prüfen", "Beschriftung aktualisieren", "Kundenübergabe durchführen"], mistakes: ["Gruppe ohne Bestandsaufnahme geändert", "Sensorpriorität übergangen", "Unterschiedliche Fahrwege ignoriert", "Dokumentation nicht aktualisiert"], diagnosisIds: ["anlage-faehrt-selbst", "motor-eine-richtung", "funk-reagiert-nicht"], partCategories: ["Gruppensteuerung", "Relais", "Zeitschaltsteuerung", "Bedienstelle"] }),
+  motor({ id: "rolltor", category: "Rolltor", name: "Rolltorantrieb und -steuerung", productIds: ["rolltor", "garagentor_antrieb"], useCases: ["Rolltor", "Rollgitter", "Torantrieb"], details: "Antrieb und Steuerung für Torlauf, Sicherheitseinrichtungen und Notbedienung. Sicherheitskreise dürfen nicht überbrückt werden.", operation: "Taster/Schlüsselschalter, Impulssteuerung oder Funk je Sicherheitskonzept.", connections: "Netz- und Sicherheitsanschlüsse ausschließlich nach Schaltplan und durch qualifizierte Personen.", failureSymptoms: ["Tor stoppt/reversiert", "Keine Fahrt", "Sicherheitskontakt meldet"], checks: ["Torlauf mechanisch prüfen", "Lichtschranke und Sicherheitskontakt testen", "Endlagen und Stoppverhalten prüfen", "Notbedienung praktisch testen", "Warn- und Bedienelemente kontrollieren", "Ergebnis im Prüfprotokoll festhalten"], mistakes: ["Sicherheitseinrichtung überbrückt", "Kraft statt Mechanik korrigiert", "Notbedienung nicht erklärt", "Fehler ohne Protokoll zurückgesetzt"], safety: true, safetyNotes: ["Quetsch- und Absturzbereiche sichern", "Schwere bewegte Bauteile beachten", "Sicherheitskreise niemals überbrücken"], diagnosisIds: ["rolltor-reversiert", "motor-faehrt-nicht"], partCategories: ["Torantrieb", "Torsteuerung", "Sicherheitskontakt", "Lichtschranke"] }),
 ];
 
 export const extraMotorTypes = [];
 export const allMotorTypes = motorTypes;
+export const motorCategories = ["Alle", ...new Set(allMotorTypes.map((item) => item.category))];
+
+export function getMotorDiagnosisIds(answers = {}) {
+  const ids = [];
+  if (answers.hums === "Ja") ids.push("motor-brummt");
+  if (answers.oneDirection === "Ja") ids.push("motor-eine-richtung");
+  if (answers.radio === "Ja" && answers.reacts === "Nein") ids.push("funk-reagiert-nicht");
+  if (answers.reacts === "Nein") ids.push("motor-faehrt-nicht");
+  if (answers.limits === "Nein") ids.push("motor-eine-richtung");
+  return [...new Set(ids)];
+}

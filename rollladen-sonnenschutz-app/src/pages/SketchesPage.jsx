@@ -8,11 +8,13 @@ import { sketchCards } from "../data/learningModules";
 const CANVAS_WIDTH = 1200;
 const CANVAS_HEIGHT = 600;
 const USE_CASES = [
-  "Aufmaß-Skizze",
+  "Aufmaß",
   "Einbausituation",
+  "Bohrpunkte",
   "Fehlerstelle",
-  "Führungsschienen/Bohrpunkte",
+  "Kabelweg",
   "Kundenhinweis",
+  "Sonstiges",
 ];
 const STROKE_WIDTHS = [2, 4, 6, 10, 14];
 
@@ -184,13 +186,14 @@ export default function SketchesPage({
   sketchImage,
 }) {
   const [useCase, setUseCase] = useState(USE_CASES[0]);
+  const [title, setTitle] = useState("");
   const [orderId, setOrderId] = useState(selectedOrderId);
   const [strokeWidth, setStrokeWidth] = useState(6);
   const [resetKey, setResetKey] = useState(0);
 
   useEffect(() => {
-    if (selectedOrderId && !orderId) setOrderId(selectedOrderId);
-  }, [selectedOrderId, orderId]);
+    if (selectedOrderId) setOrderId(selectedOrderId);
+  }, [selectedOrderId]);
 
   const handleSave = ({ image, strokeWidth: savedStrokeWidth }) => {
     const order = orders.find((item) => item.id === orderId);
@@ -198,6 +201,7 @@ export default function SketchesPage({
     saveSketch?.({
       id: "SK-" + Date.now(),
       image,
+      title: title.trim() || `${useCase} ${createdAt.toLocaleDateString("de-DE")}`,
       useCase,
       orderId,
       orderLabel: order ? order.id + " · " + order.customer : "",
@@ -212,6 +216,7 @@ export default function SketchesPage({
 
   const loadSketch = (sketch) => {
     setUseCase(sketch.useCase || USE_CASES[0]);
+    setTitle(sketch.title || "");
     setOrderId(sketch.orderId || "");
     setStrokeWidth(Number(sketch.strokeWidth) || 6);
     setSketchImage(sketch.image);
@@ -229,7 +234,7 @@ export default function SketchesPage({
       <Card>
         <SectionTitle icon={Layers} title="Skizzenbereich" subtitle="Freie Baustellenskizzen mit Maus, Finger oder Touch-Stift erstellen, lokal speichern und einem Auftrag zuordnen." />
 
-        <div className="mb-5 grid gap-4 lg:grid-cols-[1fr_0.8fr]">
+        <div className="mb-5 grid gap-4 lg:grid-cols-3">
           <div className="rounded-3xl bg-slate-50 p-4">
             <p className="text-xs font-bold uppercase tracking-wide text-slate-500">Nutzungsfall</p>
             <div className="mt-3 flex flex-wrap gap-2">
@@ -238,6 +243,7 @@ export default function SketchesPage({
               ))}
             </div>
           </div>
+          <label className="block rounded-3xl bg-slate-50 p-4 text-sm font-bold text-slate-800">Titel der Skizze<input value={title} onChange={(event) => setTitle(event.target.value)} placeholder="z. B. Bohrpunkte Südseite" className="mt-3 w-full rounded-2xl border border-slate-200 bg-white px-3 py-3 text-sm font-bold outline-none" /></label>
           <label className="block rounded-3xl bg-slate-50 p-4 text-sm font-bold text-slate-800">
             Auftrag zuordnen
             <select value={orderId} onChange={(event) => setOrderId(event.target.value)} className="mt-3 w-full rounded-2xl border border-slate-200 bg-white px-3 py-3 text-sm font-bold">
@@ -264,7 +270,7 @@ export default function SketchesPage({
               <article key={sketch.id} className="overflow-hidden rounded-3xl bg-slate-50">
                 <img src={sketch.image} alt={sketch.useCase || "Gespeicherte Skizze"} className="h-44 w-full border-b border-slate-200 bg-white object-contain" />
                 <div className="p-4">
-                  <div className="flex flex-wrap gap-2"><Badge>{sketch.useCase || "Skizze"}</Badge><Badge>{sketch.orderLabel || "ohne Auftrag"}</Badge></div>
+                  <h3 className="mb-2 font-black">{sketch.title || sketch.useCase || "Skizze"}</h3><div className="flex flex-wrap gap-2"><Badge>{sketch.useCase || "Skizze"}</Badge><Badge>{sketch.orderLabel || "ohne Auftrag"}</Badge></div>
                   <p className="mt-3 text-xs font-bold text-slate-500">{sketch.createdLabel || sketch.createdAt}</p>
                   <p className="mt-1 text-xs font-semibold text-amber-700">{sketch.syncReady ? "lokal gespeichert · sync-fähig" : (sketch.syncStatus || "lokal gespeichert")}</p>
                   <div className="mt-4 grid grid-cols-2 gap-2">

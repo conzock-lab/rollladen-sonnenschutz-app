@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { AlertTriangle, HelpCircle, Search } from "lucide-react";
+import { AlertTriangle, HelpCircle, PackageSearch, Search } from "lucide-react";
 import { Badge } from "../components/CheckItem";
 import Card from "../components/Card";
 import ModuleProgress, { InlineProgress, OrderContext } from "../components/ModuleProgress";
@@ -33,7 +33,7 @@ function DiagnosisStepMode({ trees }) {
   );
 }
 
-export default function DiagnosisPage({ checkButton, diagnosisCategories, diagnosisCategory, diagnosisQuery, filteredDiagnosisTrees, moduleChecks, selectedOrder, selectedProduct, setDiagnosisCategory, setDiagnosisQuery }) {
+export default function DiagnosisPage({ checkButton, diagnosisCategories, diagnosisCategory, diagnosisQuery, filteredDiagnosisTrees, moduleChecks, onCreatePartRequest, onOpenParts, onUse, selectedOrder, selectedProduct, setDiagnosisCategory, setDiagnosisQuery }) {
   const groups = allDiagnosisTrees.flatMap((tree) => [
     { scope: `diagnose-step-${tree.id}`, items: tree.firstSteps || [] },
     { scope: `diagnose-finish-${tree.id}`, items: tree.finishSteps || [] },
@@ -70,6 +70,7 @@ export default function DiagnosisPage({ checkButton, diagnosisCategories, diagno
               <p className="mt-3 rounded-2xl bg-white p-4 text-sm font-bold">{tree.start.q}</p>
               <div className="mt-2 grid gap-2 md:grid-cols-2"><div className="rounded-2xl bg-emerald-50 p-3 text-xs font-semibold leading-5 text-emerald-900"><strong>Ja:</strong> {tree.start.yes}</div><div className="rounded-2xl bg-rose-50 p-3 text-xs font-semibold leading-5 text-rose-900"><strong>Nein:</strong> {tree.start.no}</div></div>
               <details className="mt-3 rounded-2xl bg-white p-3"><summary className="cursor-pointer text-xs font-black uppercase text-slate-500">Abschluss dokumentieren</summary><div className="mt-2 space-y-2">{tree.finishSteps.map((step) => checkButton(`diagnose-finish-${tree.id}`, step))}</div><div className="mt-3 flex flex-wrap gap-2">{tree.tools.map((tool) => <Badge key={tool}>{tool}</Badge>)}</div></details>
+              {tree.partCategories?.length > 0 && <div className="mt-3 rounded-2xl bg-white p-3"><p className="text-xs font-black uppercase text-slate-500">Mögliche Ersatzteilgruppen</p><div className="mt-2 flex flex-wrap gap-2">{tree.partCategories.map((item) => <Badge key={item}>{item}</Badge>)}</div><div className="mt-3 grid gap-2 sm:grid-cols-2"><button type="button" onClick={() => { onUse?.({ type: "Diagnose", id: tree.id, label: tree.title, route: "diagnose" }); onOpenParts?.(tree); }} className="min-h-11 rounded-xl bg-slate-100 px-3 text-xs font-black text-slate-800"><PackageSearch size={15} className="mr-1 inline" />Ersatzteilgruppe öffnen</button><button type="button" onClick={() => { onUse?.({ type: "Diagnose", id: tree.id, label: tree.title, route: "diagnose" }); onCreatePartRequest?.(tree); }} className="min-h-11 rounded-xl bg-slate-950 px-3 text-xs font-black text-white">Anfrage erstellen</button></div></div>}
             </article>
           );
         })}

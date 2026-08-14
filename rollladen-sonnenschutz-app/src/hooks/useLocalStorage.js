@@ -15,8 +15,12 @@ export function saveJson(key, value) {
   } catch {}
 }
 
-export default function useLocalStorage(key, initialValue) {
-  const [value, setValue] = useState(() => loadJson(key, initialValue));
+export default function useLocalStorage(key, initialValue, options = {}) {
+  const [value, setValue] = useState(() => {
+    const fallback = typeof initialValue === "function" ? initialValue() : initialValue;
+    const stored = loadJson(key, fallback);
+    return options.normalize ? options.normalize(stored) : stored;
+  });
 
   useEffect(() => saveJson(key, value), [key, value]);
 

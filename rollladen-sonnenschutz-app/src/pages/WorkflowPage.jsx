@@ -7,10 +7,11 @@ import { allProductTypes } from "../data/products";
 
 function currentStageIndex(status = "") {
   const normalized = String(status).toLowerCase();
-  if (normalized.includes("archiv")) return 5;
-  if (normalized.includes("abgerechnet") || normalized.includes("erledigt")) return 4;
-  if (normalized.includes("nacharbeit") || normalized.includes("abschluss")) return 3;
-  if (normalized.includes("arbeit") || normalized.includes("teil")) return 2;
+  if (normalized.includes("archiv") || normalized.includes("erledigt")) return 6;
+  if (normalized.includes("abgerechnet") || normalized.includes("dokument")) return 5;
+  if (normalized.includes("nacharbeit") || normalized.includes("abschluss")) return 4;
+  if (normalized.includes("arbeit") || normalized.includes("montage") || normalized.includes("teil")) return 3;
+  if (normalized.includes("vorbereit")) return 2;
   if (normalized.includes("geplant")) return 1;
   return 0;
 }
@@ -45,7 +46,7 @@ export default function WorkflowPage({
 
   return <div className="space-y-5">
     <Card>
-      <SectionTitle icon={ClipboardList} title="Auftrags-Workflow" subtitle="Vom ersten Kundenwunsch bis zum Archiv – in sechs verständlichen Schritten." />
+      <SectionTitle icon={ClipboardList} title="Auftrags-Workflow" subtitle="Vom ersten Kundenwunsch bis zum Archiv – in sieben verständlichen Schritten." />
       <div className="rounded-3xl bg-slate-950 p-5 text-white">
         <p className="text-xs font-bold uppercase tracking-wide text-white/60">Aktiver Auftrag</p>
         <div className="mt-1 flex flex-wrap items-center justify-between gap-3">
@@ -55,7 +56,7 @@ export default function WorkflowPage({
       </div>
 
       <div className="mt-5 overflow-x-auto pb-2">
-        <div className="grid min-w-[760px] grid-cols-6 gap-2">
+        <div className="grid min-w-[880px] grid-cols-7 gap-2">
           {workflowStages.map((stage, index) => {
             const completed = index < activeStage;
             const current = index === activeStage;

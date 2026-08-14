@@ -11,7 +11,7 @@ export default function MobileMoreMenu({ active, favorites, groups, onClose, onL
     <section role="dialog" aria-modal="true" aria-label="Weitere Bereiche" onClick={(event) => event.stopPropagation()} className="absolute inset-x-0 bottom-0 max-h-[82vh] overflow-y-auto rounded-t-[2rem] bg-white p-4 pb-[calc(1rem+env(safe-area-inset-bottom))] shadow-2xl">
       <div className="mx-auto mb-4 h-1.5 w-12 rounded-full bg-slate-200" />
       <div className="mb-4 flex items-center justify-between"><div><p className="text-xs font-black uppercase tracking-wide text-slate-400">Navigation</p><h2 className="text-xl font-black">Mehr</h2></div><button type="button" onClick={onClose} aria-label="Menü schließen" className="flex h-11 w-11 items-center justify-center rounded-2xl bg-slate-100"><X size={20} /></button></div>
-      <div className="mb-4"><StatusBadge offline={status.offline} pendingCount={status.pendingCount} lastSyncedAt={status.lastSyncedAt} error={status.error} /></div>
+      <div className="mb-4"><StatusBadge offline={status.offline} pendingCount={status.pendingCount} failedCount={status.failedCount} lastSyncedAt={status.lastSyncedAt} error={status.error} syncing={status.syncing} onRetry={status.onRetry} showTechnicalDetails={status.showTechnicalDetails} /></div>
       <div className="space-y-5">
         {remainingGroups.map((group) => <div key={group.id}><p className="mb-2 text-xs font-black uppercase tracking-wide text-slate-400">{group.label}</p><div className="grid grid-cols-2 gap-2">{group.items.map((item) => {
           const Icon = item.icon;
@@ -23,4 +23,3 @@ export default function MobileMoreMenu({ active, favorites, groups, onClose, onL
     </section>
   </div>;
 }
-

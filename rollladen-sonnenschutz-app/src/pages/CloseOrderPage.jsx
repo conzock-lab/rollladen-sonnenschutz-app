@@ -2,12 +2,14 @@ import React from "react";
 import { AlertTriangle, CheckCircle2, FileText, PackageSearch, RefreshCw } from "lucide-react";
 import Card from "../components/Card";
 import MiniCheck, { Badge } from "../components/CheckItem";
+import { TextArea } from "../components/Field";
 import SectionTitle from "../components/SectionHeader";
 
 const actionLabels = {
   checklists: "Checkliste öffnen",
   photos: "Fotos ergänzen",
   orders: "Auftrag ergänzen",
+  details: "Auftragsdetails öffnen",
   pdf: "PDF-Protokoll öffnen",
   parts: "Ersatzteil-Anfrage starten",
   rework: "Nacharbeitsauftrag erzeugen",
@@ -17,6 +19,7 @@ export default function CloseOrderPage({
   closeReady,
   closingGroups,
   closingValues,
+  completionNote,
   completeSelectedOrder,
   createReworkOrder,
   missingClosingItems,
@@ -27,6 +30,7 @@ export default function CloseOrderPage({
   setQualityValue,
   startPartRequest,
   toggleQuality,
+  updateCompletionNote,
 }) {
   if (!selectedOrder) {
     return <Card><div className="rounded-3xl bg-slate-50 p-5 text-sm font-bold text-slate-600">Bitte zuerst einen Auftrag auswählen.</div></Card>;
@@ -41,7 +45,13 @@ export default function CloseOrderPage({
   const reworkNeeded = closingValues["rework-status"] === "needed";
   const partMissing = closingValues["parts-status"] === "missing";
   const hasPdfProtocol = closingGroups.some((group) => group.items.some((item) => item.id === "pdf-protocol" && item.done));
-  const isCompleted = selectedOrder.status === "erledigt";
+  const isCompleted = String(selectedOrder.status || "").toLocaleLowerCase("de-DE") === "erledigt";
+  const ampStatus = missingClosingItems.length ? "red" : hasPdfProtocol ? "green" : "yellow";
+  const ampConfig = {
+    red: { className: "bg-rose-50 text-rose-900", title: "Abschluss noch nicht möglich", text: `${missingClosingItems.length} Pflichtpunkte fehlen.` },
+    yellow: { className: "bg-amber-50 text-amber-900", title: "Abschluss möglich", text: "Pflichtpunkte sind erledigt, eine empfohlene Dokumentation fehlt noch." },
+    green: { className: "bg-emerald-50 text-emerald-900", title: "Auftrag kann abgeschlossen werden", text: "Pflichtpunkte und PDF-Protokoll sind vollständig." },
+  }[ampStatus];
 
   const runItemAction = (action) => {
     if (action === "rework") createReworkOrder();
@@ -60,13 +70,16 @@ export default function CloseOrderPage({
           <div className="mt-4 h-2 overflow-hidden rounded-full bg-white/15"><div className="h-full rounded-full bg-emerald-400 transition-all" style={{ width: `${completionPercent}%` }} /></div>
           <p className="mt-2 text-xs font-bold text-white/70">{completedRequiredItems}/{requiredItems.length} Pflichtpunkte erledigt</p>
         </div>
-        <div className={`rounded-3xl p-5 ${closeReady ? "bg-emerald-50 text-emerald-900" : "bg-amber-50 text-amber-900"}`}>
+        <div className={`rounded-3xl p-5 ${ampConfig.className}`}>
           <p className="text-3xl font-black">{completionPercent}%</p>
-          <p className="mt-1 text-sm font-bold">{closeReady ? "Abschluss vollständig" : `${missingClosingItems.length} Punkte fehlen`}</p>
+          <p className="mt-1 text-sm font-black">{ampConfig.title}</p>
+          <p className="mt-1 text-xs font-semibold">{ampConfig.text}</p>
           <p className="mt-3 text-xs">Produkt-Checkliste: {selectedChecklistProgress}%</p>
         </div>
       </div>
     </Card>
+
+    <Card><TextArea label="Abschlussnotiz" value={completionNote || ""} onChange={updateCompletionNote} placeholder="Arbeitsergebnis, Besonderheiten und offene Hinweise kurz dokumentieren" /></Card>
 
     <div className="grid gap-4 lg:grid-cols-2">
       {closingGroups.map((group) => {
