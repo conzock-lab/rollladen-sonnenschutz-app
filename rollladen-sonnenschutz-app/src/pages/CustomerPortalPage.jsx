@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
   BriefcaseBusiness,
   CalendarDays,
@@ -36,6 +36,7 @@ export default function CustomerPortalPage({
   currentCustomerOrders = [],
   customerDocuments = [],
   confirmCustomerAppointment,
+  initialSection = "portal",
   openCustomerOrder,
 }) {
   const sortedOrders = useMemo(
@@ -58,6 +59,19 @@ export default function CustomerPortalPage({
 
   const nextOrder = sortedOrders.find((order) => appointmentTime(order) >= Date.now());
   const confirmedCount = currentCustomerOrders.filter((order) => order.customerConfirmed).length;
+  const sectionHeading = {
+    customerDocuments: ["Meine Dokumente", "Freigegebene PDFs und Dokumentstatus nach Auftrag."],
+    customerCare: ["Pflegehinweise", "Passende Hinweise zu Ihren Produkten und Anlagen."],
+    customerContact: ["Kontakt & Rückfrage", "Eine Rückfrage vorbereiten, ohne dass automatisch etwas versendet wird."],
+    portal: ["Meine Termine & Aufträge", "Ihre persönliche Übersicht – ohne interne Notizen, Teamdaten oder Verwaltungsbereiche."],
+  }[initialSection] || ["Meine Termine & Aufträge", "Ihre persönliche Übersicht."];
+
+  useEffect(() => {
+    const firstOrder = nextOrder || sortedOrders[0];
+    if (!firstOrder) return;
+    if (initialSection === "customerCare") setOpenCareOrderId(firstOrder.id);
+    if (initialSection === "customerContact") setQuestionOrderId(firstOrder.id);
+  }, [initialSection, nextOrder?.id, sortedOrders[0]?.id]);
 
   const prepareQuestion = (order) => {
     const question = questionText.trim();
@@ -78,8 +92,8 @@ export default function CustomerPortalPage({
       <Card>
         <SectionTitle
           icon={BriefcaseBusiness}
-          title="Meine Termine & Aufträge"
-          subtitle="Ihre persönliche Übersicht – ohne interne Notizen, Teamdaten oder Verwaltungsbereiche."
+          title={sectionHeading[0]}
+          subtitle={sectionHeading[1]}
         />
         <div className="grid gap-3 sm:grid-cols-3">
           <div className="rounded-3xl bg-slate-50 p-4">

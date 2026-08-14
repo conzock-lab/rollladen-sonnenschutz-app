@@ -84,6 +84,7 @@ export default function LearningPage({
   learningProgress = {},
   myReports = [],
   updateLearningProgress,
+  initialView = "learning",
 }) {
   const azubis = useMemo(() => companyPeople.filter((person) => person.role === "azubi"), [companyPeople]);
   const initialLearnerId = canViewTeam && azubis[0]?.id ? azubis[0].id : currentLearnerId;
@@ -153,6 +154,7 @@ export default function LearningPage({
 
   return (
     <div className="space-y-5">
+      {initialView === "quiz" && <Card><div className="mb-5"><h2 className="text-xl font-black">Quiz-Trainer</h2><p className="mt-1 text-sm text-slate-600">{allQuizCards.length} kurze Wissensfragen nach Ausbildungsjahr und Thema.</p></div><QuizTrainer cards={allQuizCards} /></Card>}
       <Card>
         <SectionTitle icon={GraduationCap} title="Lernmodus" subtitle="24 kompakte Lernmodule für vier Ausbildungsjahre mit Praxisaufgaben, Fehlerbildern und gespeichertem Fortschritt." />
 
@@ -272,13 +274,13 @@ export default function LearningPage({
         {filteredModules.length === 0 && <div className="rounded-3xl bg-slate-50 p-5 text-sm font-bold text-slate-600">Keine Lernmodule passen zu diesem Filter.</div>}
       </Card>
 
-      <Card>
+      {initialView !== "quiz" && <Card>
         <button type="button" onClick={() => setShowQuiz((current) => !current)} className="flex w-full items-center justify-between text-left">
           <div><h2 className="text-xl font-black">Quiz-Trainer</h2><p className="mt-1 text-sm text-slate-600">{allQuizCards.length} kurze Wissensfragen als Ergänzung.</p></div>
           {showQuiz ? <ChevronUp /> : <ChevronDown />}
         </button>
         {showQuiz && <div className="mt-5"><QuizTrainer cards={allQuizCards} /></div>}
-      </Card>
+      </Card>}
     </div>
   );
 }
