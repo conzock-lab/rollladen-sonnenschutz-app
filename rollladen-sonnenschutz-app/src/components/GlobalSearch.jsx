@@ -1,20 +1,22 @@
 import React, { useMemo, useState } from "react";
-import { BriefcaseBusiness, Search, X } from "lucide-react";
+import { BriefcaseBusiness, FileText, Search, X } from "lucide-react";
 
 const normalize = (value) => String(value || "").toLocaleLowerCase("de-DE");
 
-export default function GlobalSearch({ items, onNavigate, onOpenOrder, orders }) {
+export default function GlobalSearch({ documents = [], items, onNavigate, onOpenDocument, onOpenOrder, orders }) {
   const [query, setQuery] = useState("");
   const results = useMemo(() => {
     const term = normalize(query).trim();
     if (term.length < 2) return [];
     const pageResults = items.filter((item) => normalize([item.label, ...(item.keywords || [])].join(" ")).includes(term)).slice(0, 6).map((item) => ({ type: "page", id: item.id, label: item.label, icon: item.icon, meta: "Bereich" }));
     const orderResults = orders.filter((order) => normalize([order.id, order.customer, order.contact, order.address, order.product, order.orderType, order.customerNote, order.notes].join(" ")).includes(term)).slice(0, 4).map((order) => ({ type: "order", id: order.id, label: `${order.id} · ${order.customer || order.orderType || "Mein Auftrag"}`, icon: BriefcaseBusiness, meta: order.address || "Auftrag" }));
-    return [...pageResults, ...orderResults].slice(0, 8);
-  }, [items, orders, query]);
+    const documentResults = documents.filter((document) => normalize([document.documentNumber, document.fileName, document.title, document.type, document.orderId, document.customer].join(" ")).includes(term)).slice(0, 4).map((document) => ({ type: "document", id: document.id, label: `${document.documentNumber || document.id} · ${document.title || document.type}`, icon: FileText, meta: `Dokument · Auftrag ${document.orderId || "–"}`, document }));
+    return [...pageResults, ...orderResults, ...documentResults].slice(0, 10);
+  }, [documents, items, orders, query]);
 
   const choose = (result) => {
     if (result.type === "order") onOpenOrder(result.id);
+    else if (result.type === "document") onOpenDocument?.(result.document);
     else onNavigate(result.id);
     setQuery("");
   };

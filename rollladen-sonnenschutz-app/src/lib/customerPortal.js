@@ -102,14 +102,20 @@ export function isCustomerDocumentVisible(document = {}) {
 export function sanitizeCustomerDocument(document = {}) {
   return {
     id: document.id,
-    orderId: document.orderId,
-    fileName: document.fileName || document.template || "Dokument",
-    template: document.template || "Kundendokument",
+    orderId: document.orderId || document.order_id,
+    fileName: document.fileName || document.file_name || document.title || document.template || "Dokument",
+    template: document.type || document.template || "Kundendokument",
+    type: document.type || document.template || "Kundendokument",
+    title: document.title || document.type || document.template || "Dokument",
+    documentNumber: document.documentNumber || document.document_number || "",
+    version: Math.max(1, Number(document.version) || 1),
+    signedStatus: document.signedStatus || document.signed_status || "nicht erforderlich",
     status: document.customerStatus || document.status || "verfügbar",
-    createdAt: document.createdAt || "",
+    createdAt: document.createdAt || document.created_at || "",
+    updatedAt: document.updatedAt || document.updated_at || "",
     customerVisible: true,
     customerVisibleAt: document.customerVisibleAt || "",
-    previewLines: Array.isArray(document.customerPreview) ? document.customerPreview : [],
+    previewLines: Array.isArray(document.customerPreview) ? document.customerPreview : Array.isArray(document.data?.customerPreview) ? document.data.customerPreview : [],
   };
 }
 

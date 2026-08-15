@@ -14,7 +14,8 @@
     "test:diagnosis": "node scripts/verify-diagnosis.mjs",
     "test:learning": "node scripts/verify-learning.mjs",
     "test:planning": "node scripts/verify-planning.mjs",
-    "test:customer": "node scripts/verify-customer-portal.mjs"
+    "test:customer": "node scripts/verify-customer-portal.mjs",
+    "test:documents": "node scripts/verify-documents.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "2.45.4",

@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from "react";
-import { Archive, Check, Copy, Pencil, Plus, RefreshCw, Search, UserRound, X } from "lucide-react";
+import { Archive, Check, Copy, Image, Pencil, Plus, RefreshCw, Search, Upload, UserRound, X } from "lucide-react";
 import Card from "../components/Card";
 import SectionTitle from "../components/SectionHeader";
 import { Field } from "../components/Field";
@@ -132,6 +132,15 @@ export default function CompanyTeamPage({
     if (editingPersonId === person.id) setEditingPersonId("");
   };
 
+  const loadLogo = (file) => {
+    if (!file) return;
+    if (file.size > 1_500_000) { showNotice("Logo ist zu groß. Bitte eine Datei unter 1,5 MB verwenden."); return; }
+    const reader = new FileReader();
+    reader.onload = () => setCompany({ ...company, logoDataUrl: String(reader.result || "") });
+    reader.onerror = () => showNotice("Logo konnte nicht lokal gelesen werden.");
+    reader.readAsDataURL(file);
+  };
+
   return (
     <div className="space-y-5">
       <Card>
@@ -141,6 +150,19 @@ export default function CompanyTeamPage({
           <Field label="Kundentelefon" value={company.contactPhone || ""} onChange={(value) => setCompany({ ...company, contactPhone: value })} placeholder="Für das Kundenportal" />
           <Field label="Kunden-E-Mail" type="email" value={company.contactEmail || ""} onChange={(value) => setCompany({ ...company, contactEmail: value })} placeholder="Für das Kundenportal" />
         </div>
+        <details className="mt-4 rounded-3xl bg-slate-50 p-4">
+          <summary className="flex cursor-pointer list-none items-center gap-2 font-black"><Image size={18} />Firmenkopf für Dokumente</summary>
+          <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+            <Field label="Straße" value={company.street || ""} onChange={(value) => setCompany({ ...company, street: value })} />
+            <Field label="PLZ" value={company.postalCode || ""} onChange={(value) => setCompany({ ...company, postalCode: value })} />
+            <Field label="Ort" value={company.city || ""} onChange={(value) => setCompany({ ...company, city: value })} />
+            <Field label="Telefon im Dokument" value={company.phone || ""} onChange={(value) => setCompany({ ...company, phone: value })} />
+            <Field label="E-Mail im Dokument" type="email" value={company.email || ""} onChange={(value) => setCompany({ ...company, email: value })} />
+            <Field label="Website" value={company.website || ""} onChange={(value) => setCompany({ ...company, website: value })} />
+            <Field label="Schlichter Dokument-Footer" value={company.documentFooter || ""} onChange={(value) => setCompany({ ...company, documentFooter: value })} placeholder="optional" />
+            <div className="rounded-2xl bg-white p-4 md:col-span-2"><p className="text-sm font-bold">Logo</p><div className="mt-2 flex flex-wrap items-center gap-3">{company.logoDataUrl ? <img src={company.logoDataUrl} alt="Aktuelles Firmenlogo" className="h-16 max-w-52 rounded-xl border border-slate-200 bg-white object-contain" /> : <span className="flex h-16 w-40 items-center justify-center rounded-xl border border-dashed border-slate-300 text-xs font-bold text-slate-400">Logo-Platzhalter</span>}<label className="flex min-h-11 cursor-pointer items-center gap-2 rounded-xl bg-slate-950 px-4 text-xs font-black text-white"><Upload size={16} />Logo lokal auswählen<input type="file" accept="image/png,image/jpeg,image/webp" className="hidden" onChange={(event) => { loadLogo(event.target.files?.[0]); event.target.value = ""; }} /></label>{company.logoDataUrl && <button type="button" onClick={() => setCompany({ ...company, logoDataUrl: "" })} className="min-h-11 rounded-xl bg-slate-100 px-4 text-xs font-black">Logo entfernen</button>}</div><p className="mt-2 text-xs font-semibold text-slate-500">Das Logo wird proportional im Firmenkopf dargestellt und nicht von einem externen CDN geladen.</p></div>
+          </div>
+        </details>
         <div className="mt-3 rounded-2xl bg-emerald-50 px-4 py-3 text-xs font-bold leading-5 text-emerald-900">Es gibt ausschließlich persönliche Codes. Kunden sind nach dem Anlegen sofort aktiv und benötigen keine zusätzliche Freigabe.</div>
       </Card>
 

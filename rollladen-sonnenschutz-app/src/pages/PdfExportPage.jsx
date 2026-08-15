@@ -1,90 +1,84 @@
-import React from "react";
-import { Copy, Download, Eye, EyeOff, FileText, Printer, RefreshCw, Save } from "lucide-react";
-import { Badge } from "../components/CheckItem";
+import React, { useEffect, useMemo, useState } from "react";
+import { ArrowLeft, FilePlus2, Files, History } from "lucide-react";
 import Card from "../components/Card";
-import { Field, TextArea } from "../components/Field";
 import SectionTitle from "../components/SectionHeader";
-
-const PDF_STATUSES = ["Entwurf", "Erstellt", "Gesendet", "Unterschrieben", "Archiviert"];
-
-function normalizePdfStatus(status = "Entwurf") {
-  const normalized = String(status).toLocaleLowerCase("de-DE");
-  return PDF_STATUSES.find((item) => item.toLocaleLowerCase("de-DE") === normalized) || "Entwurf";
-}
+import DocumentEditor from "../components/documents/DocumentEditor";
+import DocumentLibrary from "../components/documents/DocumentLibrary";
+import { DOCUMENT_TYPES } from "../data/documentTemplates";
 
 export default function PdfExportPage({
+  canArchiveDocuments,
+  canCreateDocuments,
   canManageCustomerDocuments,
+  company,
+  currentPdfSignatures,
   currentPdfTemplate,
-  getPdfValue,
+  currentPdfValues,
+  documentCompleteness,
+  documentEditorRequest,
+  duplicatePdfDocument,
+  openPdfDocument,
+  orderPhotos,
+  orders,
+  lastSyncedAt,
   pdfDocuments,
   pdfFileName,
   pdfPreviewLines,
   pdfTarget,
-  pdfTemplateDefinitions,
   resetPdfTemplate,
   savePdfDocument,
+  savedSketches,
+  selectedPdfDocument,
   selectedOrder,
   selectedProduct,
   setPdfField,
-  setPdfTarget,
-  updatePdfDocumentStatus,
+  setPdfSignature,
+  startPdfDocument,
   updateCustomerDocumentVisibility,
+  updatePdfDocumentStatus,
+  archivePdfDocument,
+  syncQueue,
 }) {
+  const [view, setView] = useState(selectedPdfDocument ? "editor" : "library");
+  const [customerVersion, setCustomerVersion] = useState(false);
+  const [newType, setNewType] = useState("Montageprotokoll");
+  const [newOrderId, setNewOrderId] = useState(selectedOrder?.id || "");
+
+  useEffect(() => { if (documentEditorRequest) setView("editor"); }, [documentEditorRequest]);
+  useEffect(() => { if (selectedPdfDocument) setView("editor"); }, [selectedPdfDocument?.id]);
+  useEffect(() => { if (selectedOrder?.id) setNewOrderId(selectedOrder.id); }, [selectedOrder?.id]);
+
+  const previewDocument = useMemo(() => selectedPdfDocument || {
+    id: "new",
+    orderId: selectedOrder?.id || "",
+    title: currentPdfTemplate.title,
+    type: pdfTarget,
+    status: "Entwurf",
+    version: 1,
+    documentNumber: "",
+    fileName: pdfFileName,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  }, [currentPdfTemplate.title, pdfFileName, pdfTarget, selectedOrder?.id, selectedPdfDocument]);
+
+  const createNew = (type = newType, orderId = newOrderId || selectedOrder?.id) => {
+    if (!startPdfDocument(type, orderId)) return;
+    setCustomerVersion(false);
+    setView("editor");
+  };
+
+  const copyText = async () => {
+    try { await navigator.clipboard?.writeText(pdfPreviewLines); } catch { /* Browser kann Clipboard verweigern; Vorschau bleibt nutzbar. */ }
+  };
+
+  if (view === "editor") return <div className="space-y-4">
+    <div className="no-print flex flex-wrap items-center justify-between gap-3"><button type="button" onClick={() => setView("library")} className="flex min-h-11 items-center gap-2 rounded-2xl bg-white px-4 text-sm font-black shadow-sm"><ArrowLeft size={17} />Dokumentenübersicht</button><div className="rounded-full bg-slate-100 px-4 py-2 text-xs font-black">{selectedPdfDocument ? `Bearbeiten · Version ${selectedPdfDocument.version}` : "Neue Vorlage"}</div></div>
+    <DocumentEditor company={company} completeness={documentCompleteness} customerVersion={customerVersion} document={previewDocument} fields={currentPdfValues} fileName={pdfFileName} onCopy={copyText} onCustomerVersionChange={setCustomerVersion} onFieldChange={setPdfField} onPrint={() => window.print()} onReset={() => { if (window.confirm("Vorlage zurücksetzen? Auftragsdaten werden anschließend erneut automatisch eingesetzt.")) resetPdfTemplate(); }} onSave={savePdfDocument} onSignatureChange={setPdfSignature} order={selectedOrder} orderPhotos={orderPhotos} productName={selectedProduct?.name} readOnly={!canCreateDocuments || (!canManageCustomerDocuments && (selectedPdfDocument?.customerVisible || ["Freigegeben", "Archiviert"].includes(selectedPdfDocument?.status)))} savedSketches={savedSketches} signatures={currentPdfSignatures} template={currentPdfTemplate} />
+    {selectedPdfDocument?.history?.length > 0 && <Card className="no-print"><SectionTitle icon={History} title="Dokumenthistorie" subtitle="Relevante Änderungen, Status- und Freigabeereignisse." /><div className="space-y-2">{selectedPdfDocument.history.map((entry) => <div key={entry.id} className="flex flex-wrap items-center justify-between gap-2 rounded-2xl bg-slate-50 p-3 text-sm"><strong>{entry.action}</strong><span className="text-xs font-semibold text-slate-500">{entry.by} · {new Date(entry.at).toLocaleString("de-DE")}{entry.version ? ` · Version ${entry.version}` : ""}</span></div>)}</div></Card>}
+  </div>;
+
   return <div className="space-y-5">
-    <Card className="no-print">
-      <SectionTitle icon={Download} title="PDF-Vorlagen ausfüllen" subtitle="Wähle eine Vorlage und fülle die passenden Felder aus. Beim Drucken/PDF-Export wird nur die Vorschau gedruckt – nicht die App-Oberfläche." />
-      <div className="grid gap-4 lg:grid-cols-[0.7fr_1.3fr]">
-        <div className="rounded-3xl bg-slate-50 p-4">
-          <label className="text-sm font-bold text-slate-800">PDF-Vorlage
-            <select value={pdfTarget} onChange={(event) => setPdfTarget(event.target.value)} className="mt-2 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-bold">
-              {Object.keys(pdfTemplateDefinitions).map((name) => <option key={name}>{name}</option>)}
-            </select>
-          </label>
-          <p className="mt-3 text-sm leading-6 text-slate-600">{currentPdfTemplate.description}</p>
-          <div className="mt-4 rounded-2xl bg-white p-3 text-xs font-bold leading-5 text-slate-500">Aktiver Auftrag: {selectedOrder?.id || "-"} · {selectedOrder?.customer || "-"} · {selectedProduct?.name || "Produkt offen"}</div>
-        </div>
-        <div className="grid gap-3 md:grid-cols-2">
-          {currentPdfTemplate.fields.map((field) => field.type === "textarea"
-            ? <TextArea key={field.key} label={field.label} value={getPdfValue(field)} onChange={(value) => setPdfField(field.key, value)} placeholder={field.placeholder || ""} />
-            : field.type === "select"
-              ? <label key={field.key} className="block rounded-2xl bg-slate-50 p-4 text-sm font-bold text-slate-800">{field.label}
-                <select value={getPdfValue(field)} onChange={(event) => setPdfField(field.key, event.target.value)} className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm font-medium outline-none focus:border-slate-950">
-                  <option value="">Bitte auswählen</option>
-                  {field.options.map((option) => <option key={option}>{option}</option>)}
-                </select>
-              </label>
-              : <Field key={field.key} label={field.label} type={field.type || "text"} value={getPdfValue(field)} onChange={(value) => setPdfField(field.key, value)} placeholder={field.placeholder || ""} />)}
-        </div>
-      </div>
-      <div className="mt-5 rounded-2xl bg-slate-50 p-3 text-xs font-bold text-slate-600">Automatischer Dateiname: {pdfFileName}</div>
-      <div className="mt-3 grid gap-3 md:grid-cols-4">
-        <button type="button" onClick={() => navigator.clipboard?.writeText(pdfPreviewLines)} className="flex items-center justify-center gap-2 rounded-2xl bg-slate-100 px-4 py-3 text-sm font-bold text-slate-800"><Copy size={18} />PDF-Text kopieren</button>
-        <button type="button" onClick={savePdfDocument} className="flex items-center justify-center gap-2 rounded-2xl bg-emerald-100 px-4 py-3 text-sm font-bold text-emerald-800"><Save size={18} />Dokument speichern</button>
-        <button type="button" onClick={resetPdfTemplate} className="flex items-center justify-center gap-2 rounded-2xl bg-slate-100 px-4 py-3 text-sm font-bold text-slate-800"><RefreshCw size={18} />Vorlage zurücksetzen</button>
-        <button type="button" onClick={() => window.print()} className="flex items-center justify-center gap-2 rounded-2xl bg-slate-950 px-4 py-3 text-sm font-bold text-white"><Printer size={18} />Nur Vorschau als PDF</button>
-      </div>
-    </Card>
-
-    <Card className="print-area">
-      <SectionTitle icon={FileText} title="PDF-Vorschau" subtitle="Nur dieser Bereich erscheint später in der PDF." />
-      <div className="rounded-3xl border border-slate-200 bg-white p-6 text-slate-950 shadow-sm md:p-8"><pre className="whitespace-pre-wrap break-words font-sans text-sm leading-7">{pdfPreviewLines}</pre></div>
-    </Card>
-
-    <Card className="no-print">
-      <SectionTitle icon={FileText} title="Gespeicherte PDF-Dokumente" subtitle="Dokumente werden dem Auftrag zugeordnet und können einen Status bekommen." />
-      <div className="grid gap-3 md:grid-cols-2">
-        {pdfDocuments.length === 0 && <div className="rounded-2xl bg-slate-50 p-4 text-sm font-bold text-slate-600">Noch keine PDF-Dokumente gespeichert.</div>}
-        {pdfDocuments.map((document) => <article key={document.id} className="rounded-3xl bg-slate-50 p-4">
-          <div className="flex flex-wrap items-center gap-2"><Badge>{document.template}</Badge><Badge>{normalizePdfStatus(document.status)}</Badge></div>
-          <h3 className="mt-2 font-black">{document.fileName}</h3>
-          <p className="mt-1 text-xs text-slate-500">{document.createdAt} · Auftrag {document.orderId}</p>
-          <select value={normalizePdfStatus(document.status)} onChange={(event) => updatePdfDocumentStatus(document.id, event.target.value)} className="mt-3 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-bold">
-            {PDF_STATUSES.map((status) => <option key={status}>{status}</option>)}
-          </select>
-          <div className={`mt-3 rounded-2xl p-3 text-xs font-bold ${document.customerVisible ? "bg-emerald-100 text-emerald-950" : "bg-white text-slate-600"}`}>{document.customerVisible ? "Für den Kunden freigegeben" : "Interner Entwurf – nicht im Kundenportal sichtbar"}</div>
-          {canManageCustomerDocuments && <button type="button" onClick={() => updateCustomerDocumentVisibility(document.id, !document.customerVisible)} className={`mt-2 flex min-h-11 w-full items-center justify-center gap-2 rounded-xl px-3 text-xs font-black ${document.customerVisible ? "bg-slate-200 text-slate-800" : "bg-emerald-900 text-white"}`}>{document.customerVisible ? <EyeOff size={17} /> : <Eye size={17} />}{document.customerVisible ? "Freigabe zurücknehmen" : "Für Kunden freigeben"}</button>}
-        </article>)}
-      </div>
-    </Card>
+    <Card className="no-print"><SectionTitle icon={Files} title="Dokumente" subtitle="Auftragsbezogene Vorlagen, Status, Versionen und Kundenfreigaben zentral verwalten." />{canCreateDocuments && <div className="grid gap-3 rounded-3xl bg-slate-50 p-4 md:grid-cols-[1fr_1fr_auto] md:items-end"><label className="text-sm font-bold">Dokumenttyp<select value={newType} onChange={(event) => setNewType(event.target.value)} className="mt-2 min-h-12 w-full rounded-xl border border-slate-200 bg-white px-3">{DOCUMENT_TYPES.map((type) => <option key={type}>{type}</option>)}</select></label><label className="text-sm font-bold">Auftrag<select required value={newOrderId} onChange={(event) => setNewOrderId(event.target.value)} className="mt-2 min-h-12 w-full rounded-xl border border-slate-200 bg-white px-3"><option value="" disabled>Auftrag auswählen</option>{orders.map((order) => <option key={order.id} value={order.id}>{order.id} · {order.customer}</option>)}</select></label><button type="button" disabled={!newOrderId && !selectedOrder?.id} onClick={() => createNew()} className="flex min-h-12 items-center justify-center gap-2 rounded-2xl bg-slate-950 px-5 text-sm font-black text-white disabled:cursor-not-allowed disabled:opacity-40"><FilePlus2 size={18} />Dokument erstellen</button></div>}</Card>
+    <DocumentLibrary canArchive={canArchiveDocuments} canCreate={canCreateDocuments} canRelease={canManageCustomerDocuments} documents={pdfDocuments} lastSyncedAt={lastSyncedAt} onArchive={archivePdfDocument} onDuplicate={(document) => { const copy = duplicatePdfDocument(document); if (copy) openPdfDocument(copy); setView("editor"); }} onNew={createNew} onOpen={(document) => { openPdfDocument(document); setView("editor"); }} onStatusChange={updatePdfDocumentStatus} onVisibilityChange={updateCustomerDocumentVisibility} orders={orders} syncQueue={syncQueue} />
   </div>;
 }

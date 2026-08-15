@@ -72,11 +72,25 @@ import {
   restoreSyncQueue,
   retryFailedQueue,
 } from "./lib/syncQueue";
-import { loadLearningRecord, saveAssignedOrderChanges, saveCompanySnapshot, saveCustomerPortalChanges, saveLearningRecord } from "./services/supabaseSync";
-import { buildPdfPreview, createPdfFileName } from "./lib/pdfHelpers";
+import { loadLearningRecord, loadOrderDocuments, saveAssignedOrderChanges, saveCompanySnapshot, saveCustomerPortalChanges, saveLearningRecord, saveOrderDocuments } from "./services/supabaseSync";
+import {
+  addDocumentHistory,
+  buildPdfPreview,
+  createDocumentRecord,
+  createPdfFileName,
+  documentToRow,
+  duplicateDocumentRecord,
+  formatFieldValue,
+  getDocumentCompleteness,
+  groupDocumentFields,
+  normalizePdfDocument,
+  rowToDocument,
+  updateDocumentRecord,
+} from "./lib/pdfHelpers";
 import { buildOrderOpenItems, getOrderSyncStatus } from "./lib/orderWorkspace";
 import { buildPartRequestText, createEmptyPartRequest, getPartPhotoRequirements } from "./lib/partsHelpers";
 import { productTypes, checklistTemplates, dynamicChecklistRules, measurementRequiredFields } from "./data/products";
+import { getDocumentTemplate } from "./data/documentTemplates";
 import { normalizeOrderStatus } from "./data/orders";
 import { allManufacturers } from "./data/manufacturers";
 import { allDiagnosisTrees } from "./data/diagnosis";
@@ -149,94 +163,6 @@ function useDeviceLayout() {
 }
 
 
-const pdfTemplateDefinitions = {
-  "Montageprotokoll": {
-    title: "Montageprotokoll",
-    description: "Für Montageabschluss, Funktionsprüfung, Kundeneinweisung und offene Punkte.",
-    fields: [
-      { key: "monteur", label: "Monteur / Vorarbeiter", type: "text", auto: "assignedTo", placeholder: "z. B. Max Mustermann" },
-      { key: "montageDate", label: "Montagedatum", type: "date", auto: "date" },
-      { key: "startTime", label: "Beginn", type: "time", auto: "time" },
-      { key: "endTime", label: "Ende", type: "time", placeholder: "z. B. 15:30" },
-      { key: "weather", label: "Wetter / Baustellensituation", type: "text", placeholder: "z. B. trocken, windstill, Zugang frei" },
-      { key: "workDone", label: "Durchgeführte Arbeiten", type: "textarea", auto: "workDone", placeholder: "Montage, Befestigung, Einstellung, Funktionsprüfung ..." },
-      { key: "functionTest", label: "Funktionsprüfung", type: "select", options: ["ohne Mangel", "mit Hinweis", "nicht möglich"] },
-      { key: "customerInstruction", label: "Kundeneinweisung", type: "select", options: ["durchgeführt", "nicht anwesend", "noch offen"] },
-      { key: "openIssues", label: "Offene Punkte / Mängel", type: "textarea", placeholder: "z. B. Ersatzteil nachbestellen, Silikonfuge nachziehen ..." },
-      { key: "signatures", label: "Unterschriften", type: "text", placeholder: "Monteur / Kunde" },
-    ],
-  },
-  "Aufmaßblatt": {
-    title: "Aufmaßblatt",
-    description: "Für Produktdaten, Maße, Einbausituation, Untergrund und Bestellinformationen.",
-    fields: [
-      { key: "measuredBy", label: "Aufmaß aufgenommen von", type: "text", auto: "assignedTo", placeholder: "z. B. Max Mustermann" },
-      { key: "measurementDate", label: "Aufmaßdatum", type: "date", auto: "date" },
-      { key: "width", label: "Breite", type: "text", auto: "width", placeholder: "z. B. 1200 mm" },
-      { key: "height", label: "Höhe", type: "text", auto: "height", placeholder: "z. B. 1400 mm" },
-      { key: "installation", label: "Einbausituation", type: "text", auto: "installType", placeholder: "z. B. Renovierung / Neubau / Laibung" },
-      { key: "operationSide", label: "Bedienseite / Motorseite", type: "text", placeholder: "links / rechts" },
-      { key: "color", label: "Farbe / Oberfläche", type: "text", placeholder: "z. B. weiß, anthrazit, RAL ..." },
-      { key: "cableExit", label: "Kabelauslass / Strom", type: "text", placeholder: "z. B. links oben vorhanden" },
-      { key: "specialNotes", label: "Besonderheiten", type: "textarea", placeholder: "Schräge Laibung, WDVS, alte Anlage, Zugang, Gerüst ..." },
-    ],
-  },
-  "Wartungsprotokoll": {
-    title: "Wartungsprotokoll",
-    description: "Für Zustand, Reinigung, Prüfung, Mängel und nächste Wartung.",
-    fields: [
-      { key: "maintenanceBy", label: "Wartung durchgeführt von", type: "text", auto: "assignedTo", placeholder: "z. B. Max Mustermann" },
-      { key: "maintenanceDate", label: "Wartungsdatum", type: "date", auto: "date" },
-      { key: "condition", label: "Anlagenzustand", type: "select", options: ["gut", "gebraucht", "mangelhaft", "defekt"] },
-      { key: "cleaning", label: "Reinigung", type: "select", options: ["durchgeführt", "teilweise durchgeführt", "nicht erforderlich", "nicht möglich"] },
-      { key: "checkedParts", label: "Geprüfte Bauteile", type: "textarea", auto: "checkedParts", placeholder: "Führungsschienen, Panzer, Endlagen, Motor, Sensorik ..." },
-      { key: "defects", label: "Festgestellte Mängel", type: "textarea", placeholder: "Keine Mängel / Mängel eintragen ..." },
-      { key: "recommendation", label: "Empfehlung", type: "textarea", placeholder: "z. B. Ersatzteil tauschen, jährliche Wartung, Reinigung ..." },
-      { key: "nextMaintenance", label: "Nächste Wartung", type: "text", placeholder: "z. B. in 12 Monaten" },
-    ],
-  },
-  "Kundenübergabe": {
-    title: "Kundenübergabe",
-    description: "Für Bedienhinweise, Pflege, Sicherheit, Übergabe und Bestätigung durch den Kunden.",
-    fields: [
-      { key: "handoverTo", label: "Übergabe an", type: "text", auto: "customer", placeholder: "z. B. Herr/Frau Mustermann" },
-      { key: "handoverDate", label: "Übergabedatum", type: "date", auto: "date" },
-      { key: "operationExplained", label: "Bedienung erklärt", type: "select", options: ["ja", "teilweise", "nein"] },
-      { key: "careExplained", label: "Pflegehinweise erklärt", type: "select", options: ["ja", "teilweise", "nein"] },
-      { key: "safetyExplained", label: "Sicherheits-/Windhinweise erklärt", type: "select", options: ["ja", "teilweise", "nein"] },
-      { key: "documents", label: "Übergebene Unterlagen", type: "textarea", placeholder: "Bedienungsanleitung, Pflegehinweise, Angebot, Protokoll ..." },
-      { key: "customerQuestions", label: "Fragen / Hinweise Kunde", type: "textarea", placeholder: "Fragen oder Wünsche des Kunden ..." },
-      { key: "handoverResult", label: "Übergabe-Ergebnis", type: "select", options: ["ohne Beanstandung", "mit Hinweis", "Nacharbeit erforderlich"] },
-    ],
-  },
-  "Angebotsentwurf": {
-    title: "Angebotsentwurf",
-    description: "Für Leistung, Positionen, Preise, Gültigkeit und Hinweise vor Versand.",
-    fields: [
-      { key: "offerDate", label: "Angebotsdatum", type: "date", auto: "today" },
-      { key: "validUntil", label: "Gültig bis", type: "text", placeholder: "z. B. 14 Tage" },
-      { key: "service", label: "Leistungsbeschreibung", type: "textarea", auto: "offerService", placeholder: "Lieferung und Montage ..." },
-      { key: "material", label: "Material netto", type: "number", auto: "material" },
-      { key: "labor", label: "Arbeitszeit / Lohn", type: "text", auto: "labor" },
-      { key: "travel", label: "Anfahrt netto", type: "number", auto: "travel" },
-      { key: "totalNet", label: "Gesamt netto", type: "number", auto: "net" },
-      { key: "offerNotes", label: "Zusatzhinweise", type: "textarea", placeholder: "Untergrundprüfung, Stromanschluss, Lieferzeit, Herstellerangaben ..." },
-    ],
-  },
-  "Berichtsheft-Eintrag": {
-    title: "Berichtsheft-Eintrag",
-    description: "Für Tages-/Wochenbericht, Lernfeld, Ausbildungsjahr und Meister-Kommentar.",
-    fields: [
-      { key: "reportMode", label: "Berichtsart", type: "select", options: ["Tagesbericht", "Wochenbericht"] },
-      { key: "reportYear", label: "Ausbildungsjahr", type: "select", options: ["1", "2", "3"] },
-      { key: "learningField", label: "Lernfeld", type: "text", auto: "learningField" },
-      { key: "reportText", label: "Berichtstext", type: "textarea", auto: "reportProposal" },
-      { key: "reportStatus", label: "Status", type: "select", options: ["Entwurf", "Zur Prüfung", "Änderung nötig", "Freigegeben"] },
-      { key: "masterComment", label: "Meister-Kommentar", type: "textarea", auto: "masterComment" },
-    ],
-  },
-};
-
 const customerTemplates = [
   { title: "Terminbestätigung", text: "Hallo {kunde}, wir bestätigen den Montagetermin für {produkt}. Termin: {termin}. Adresse: {adresse}. Bitte sorgen Sie dafür, dass der Montagebereich frei zugänglich ist." },
   { title: "Montagevorbereitung", text: "Hallo {kunde}, bitte räumen Sie den Bereich für {produkt} vor dem Termin frei. Termin: {termin}." },
@@ -286,6 +212,14 @@ const defaultCompany = () => ({
   name: "Muster Sonnenschutz GmbH",
   contactPhone: "",
   contactEmail: "",
+  street: "",
+  postalCode: "",
+  city: "",
+  phone: "",
+  email: "",
+  website: "",
+  logoDataUrl: "",
+  documentFooter: "",
   createdAt: new Date().toLocaleString("de-DE"),
 });
 const defaultCompanyPeople = () => [
@@ -486,6 +420,8 @@ export default function App() {
   const [generatedAiResponse, setGeneratedAiResponse] = useState("");
   const [pdfTarget, setPdfTarget] = useState("Montageprotokoll");
   const [pdfFormData, setPdfFormData] = useState(() => loadJson("rs-pdf-form-data", {}));
+  const [selectedPdfDocumentId, setSelectedPdfDocumentId] = useState("");
+  const [documentEditorRequest, setDocumentEditorRequest] = useState(0);
   const [company, setCompany] = useState(() => loadJson("rs-company", defaultCompany()));
   const [companyPeople, setCompanyPeople] = useState(() => loadJson("rs-company-people", defaultCompanyPeople()));
   const [planningAbsences, setPlanningAbsences] = useLocalStorage("rs-planning-absences", []);
@@ -499,7 +435,7 @@ export default function App() {
   const [lastSyncedAt, setLastSyncedAt] = useLocalStorage("rs-last-synced-at", "");
   const [syncError, setSyncError] = useState("");
   const [syncing, setSyncing] = useState(false);
-  const [pdfDocuments, setPdfDocuments] = useState(() => loadJson("rs-pdf-documents", []));
+  const [pdfDocuments, setPdfDocuments] = useState(() => (loadJson("rs-pdf-documents", []) || []).map(normalizePdfDocument));
   const [moduleChecks, setModuleChecks] = useState(() => loadJson("rs-module-checks", {}));
   const [learningProgress, setLearningProgress] = useLocalStorage("rs-learning-progress", {});
   const [quizProgress, setQuizProgress] = useLocalStorage("rs-quiz-progress", {});
@@ -560,6 +496,8 @@ export default function App() {
 
   const currentPerson = authUser?.personId ? companyPeople.find((p) => p.id === authUser.personId) : null;
   const isCompanyAdmin = ["dev", "meister", "buero"].includes(appRole);
+  const canCreateDocuments = ["dev", "meister", "buero", "vorarbeiter", "monteur"].includes(appRole);
+  const canArchiveDocuments = ["dev", "meister", "buero"].includes(appRole);
   const visibleOrders = useMemo(() => {
     if (isCompanyAdmin) return orders;
     if (!currentPerson) return appRole === "kunde" ? [] : orders;
@@ -572,6 +510,10 @@ export default function App() {
     return appRole === "kunde" ? [] : orders;
   }, [orders, isCompanyAdmin, appRole, currentPerson?.id, currentPerson?.role, currentPerson?.name]);
   const selectedOrder = visibleOrders.find((o) => o.id === selectedOrderId) || visibleOrders[0] || (isCompanyAdmin ? orders[0] : null);
+  const visiblePdfDocuments = useMemo(() => {
+    const visibleOrderIds = new Set(visibleOrders.map((order) => order.id));
+    return pdfDocuments.filter((document) => visibleOrderIds.has(document.orderId));
+  }, [pdfDocuments, visibleOrders]);
   const selectedProduct = productTypes.find((p) => p.id === selectedOrder?.product) || productTypes[0];
   const newOrderProduct = productTypes.find((p) => p.id === newOrder.product) || productTypes[0];
   const buildChecklistItems = (productId, source = {}) => [...new Set([...(checklistTemplates[productId] || []), ...dynamicChecklistRules.filter((rule) => Object.entries(rule.when).every(([key, value]) => source[key] === value)).flatMap((rule) => rule.items)])];
@@ -807,18 +749,27 @@ export default function App() {
   const partPhotoRequirements = getPartPhotoRequirements(partRequest.product || partRequestOrder?.product);
   const partRequestText = buildPartRequestText(partRequest, partRequestOrder, partPhotoChecks);
   const customerTemplateForOrder = (text) => text.replaceAll("{kunde}", selectedOrder?.customer || "Kunde").replaceAll("{produkt}", selectedProduct.name).replaceAll("{termin}", `${selectedOrder?.date || "Termin"} ${selectedOrder?.time || ""}`.trim()).replaceAll("{adresse}", selectedOrder?.address || "Adresse");
-  const currentPdfTemplate = pdfTemplateDefinitions[pdfTarget] || pdfTemplateDefinitions["Montageprotokoll"];
-  const currentPdfValues = pdfFormData[selectedOrder?.id || "global"]?.[pdfTarget] || {};
+  const selectedPdfDocument = visiblePdfDocuments.find((document) => document.id === selectedPdfDocumentId) || null;
+  const currentPdfTemplate = getDocumentTemplate(pdfTarget, selectedOrder?.product);
+  const currentPdfDraftKey = selectedPdfDocumentId || `new:${selectedOrder?.id || "global"}:${pdfTarget}`;
+  const currentPdfDraft = pdfFormData[currentPdfDraftKey];
+  const legacyPdfValues = pdfFormData[selectedOrder?.id || "global"]?.[pdfTarget] || {};
+  const explicitPdfValues = currentPdfDraft ? (currentPdfDraft.fields || {}) : selectedPdfDocument?.fields || selectedPdfDocument?.data?.fields || legacyPdfValues;
   const getPdfAutoValue = (field) => {
     const measurementWidth = orderMeasurements["Breite"] || orderMeasurements["lichte Breite"] || "";
     const measurementHeight = orderMeasurements["Höhe"] || orderMeasurements["lichte Höhe"] || "";
+    if (field.auto?.startsWith("measurement:")) return orderMeasurements[field.auto.slice("measurement:".length)] || "";
+    if (field.auto?.startsWith("quality:")) return Boolean(closingValues[field.auto.slice("quality:".length)]);
     const map = {
       assignedTo: selectedOrder?.assignedTo || authUser?.name || "",
       date: selectedOrder?.date || todayIso(),
       today: todayIso(),
       time: selectedOrder?.time || "",
       customer: selectedOrder?.customer || "",
+      manufacturer: selectedOrder?.manufacturer || "",
       installType: selectedOrder?.installType || "",
+      substrate: selectedOrder?.substrate || "",
+      drive: selectedOrder?.drive || "",
       width: measurementWidth,
       height: measurementHeight,
       workDone: `Montage/Arbeiten an ${selectedProduct.name}. ${selectedOrder?.notes || ""}`.trim(),
@@ -831,27 +782,42 @@ export default function App() {
       learningField: reportLearningField,
       reportProposal,
       masterComment: reportMasterComment,
+      sourceOrder: selectedOrder?.sourceOrderId || selectedOrder?.reworkSourceOrderId || selectedOrder?.id || "",
+      reworkReason: selectedOrder?.reworkReason || selectedOrder?.notes || "",
+      customerIssue: selectedOrder?.customerPortal?.issues?.[0]?.description || "",
+      photosAvailable: Object.keys(orderPhotos).length > 0,
+      photoReferences: Object.keys(orderPhotos).filter((category) => orderPhotos[category]?.url).join(", "),
+      sketchReference: (Array.isArray(savedSketches) ? savedSketches : []).filter((sketch) => sketch.orderId === selectedOrder?.id).map((sketch) => sketch.title || sketch.useCase).join(", "),
     };
     return map[field.auto] ?? "";
   };
-  const getPdfValue = (field) => currentPdfValues[field.key] ?? getPdfAutoValue(field) ?? "";
+  const getPdfValue = (field) => Object.prototype.hasOwnProperty.call(explicitPdfValues, field.key) ? explicitPdfValues[field.key] : getPdfAutoValue(field);
+  const currentPdfValues = {
+    ...Object.fromEntries(currentPdfTemplate.fields.map((field) => [field.key, getPdfValue(field)])),
+    ...(explicitPdfValues._photoRefs ? { _photoRefs: explicitPdfValues._photoRefs } : {}),
+    ...(explicitPdfValues._sketchId ? { _sketchId: explicitPdfValues._sketchId } : {}),
+  };
+  const currentPdfSignatures = currentPdfDraft ? (currentPdfDraft.signatures || {}) : selectedPdfDocument?.signatures || selectedPdfDocument?.data?.signatures || {};
   const setPdfField = (key, value) => setPdfFormData((current) => {
-    const orderKey = selectedOrder?.id || "global";
-    return { ...current, [orderKey]: { ...(current[orderKey] || {}), [pdfTarget]: { ...((current[orderKey] || {})[pdfTarget] || {}), [key]: value } } };
+    const draft = current[currentPdfDraftKey] || { fields: { ...explicitPdfValues }, signatures: { ...currentPdfSignatures } };
+    return { ...current, [currentPdfDraftKey]: { ...draft, fields: { ...(draft.fields || {}), [key]: value }, updatedAt: new Date().toISOString() } };
   });
-  const resetPdfTemplate = () => setPdfFormData((current) => {
-    const orderKey = selectedOrder?.id || "global";
-    const nextOrder = { ...(current[orderKey] || {}) };
-    delete nextOrder[pdfTarget];
-    return { ...current, [orderKey]: nextOrder };
+  const setPdfSignature = (label, value) => setPdfFormData((current) => {
+    const draft = current[currentPdfDraftKey] || { fields: { ...explicitPdfValues }, signatures: { ...currentPdfSignatures } };
+    return { ...current, [currentPdfDraftKey]: { ...draft, signatures: { ...(draft.signatures || {}), [label]: value }, updatedAt: new Date().toISOString() } };
   });
+  const resetPdfTemplate = () => setPdfFormData((current) => ({ ...current, [currentPdfDraftKey]: { fields: {}, signatures: {}, resetAt: new Date().toISOString() } }));
   const pdfFileName = createPdfFileName(pdfTarget, selectedOrder);
+  const documentCompleteness = getDocumentCompleteness(currentPdfTemplate, currentPdfValues);
   const pdfPreviewLines = buildPdfPreview([
-    `${company.name}`,
-    "Rollladen- & Sonnenschutztechnik",
+    company.name || "Muster Sonnenschutz GmbH",
+    [company.street, [company.postalCode, company.city].filter(Boolean).join(" ")].filter(Boolean).join(" · "),
+    [company.phone || company.contactPhone, company.email || company.contactEmail, company.website].filter(Boolean).join(" · "),
     "",
-    `${currentPdfTemplate.title}`,
-    `Dokumentstatus: ${pdfDocuments.find((doc) => doc.orderId === selectedOrder?.id && doc.template === pdfTarget)?.status || "Entwurf"}`,
+    currentPdfTemplate.title,
+    `Dokumentnummer: ${selectedPdfDocument?.documentNumber || "wird beim Speichern erzeugt"}`,
+    `Version: ${selectedPdfDocument?.version || 1}`,
+    `Dokumentstatus: ${selectedPdfDocument?.status || "Entwurf"}`,
     `Dateiname: ${pdfFileName}`,
     "",
     "KUNDEN- UND AUFTRAGSDATEN",
@@ -870,9 +836,11 @@ export default function App() {
     `Einbauart: ${selectedOrder?.installType || "-"}`,
     `Notizen Auftrag: ${selectedOrder?.notes || "-"}`,
     "",
-    "VORLAGENINHALT",
-    ...currentPdfTemplate.fields.map((field) => `${field.label}: ${getPdfValue(field) || "-"}`),
-    "",
+    ...groupDocumentFields(currentPdfTemplate).flatMap((group) => [
+      group.title.toLocaleUpperCase("de-DE"),
+      ...group.fields.map((field) => `${field.label}: ${formatFieldValue(currentPdfValues[field.key], field.type)}`),
+      "",
+    ]),
     "QUALITÄTSPRÜFUNG",
     `Checkliste: ${selectedChecklistDone}/${selectedChecklistItems.length} erledigt`,
     `Aufmaß: ${measurementFields.length - missingMeasurements.length}/${measurementFields.length} Pflichtfelder ausgefüllt`,
@@ -887,47 +855,76 @@ export default function App() {
     const at = new Date().toLocaleString("de-DE");
     setOrders((list) => list.map((order) => order.id === orderId ? { ...order, updatedAt: at, statusHistory: [...(order.statusHistory || []), { status: status || order.status, at, by: authUser?.name || "System", note }] } : order));
   };
-  const savePdfDocument = () => {
-    const doc = {
-      id: `PDF-${Date.now()}`,
-      orderId: selectedOrder?.id || "",
-      customer: selectedOrder?.customer || "",
-      template: pdfTarget,
-      status: "Erstellt",
-      fileName: pdfFileName,
-      createdAt: new Date().toLocaleString("de-DE"),
-      text: pdfPreviewLines,
-      customerVisible: false,
-      customerStatus: "wartet auf Freigabe",
-      customerPreview: [
-        company.name,
-        currentPdfTemplate.title,
-        `Auftrag: ${selectedOrder?.id || "-"}`,
-        `Produkt: ${selectedProduct.name}`,
-        `Termin: ${selectedOrder?.date || "-"} ${selectedOrder?.time || ""}`.trim(),
-        `Adresse: ${selectedOrder?.address || "-"}`,
-        "Dieses Dokument wurde vom Fachbetrieb für die Kundenansicht vorbereitet.",
-      ],
-    };
-    setPdfDocuments((docs) => [doc, ...docs]);
-    addToSyncQueue("PDF-Dokument gespeichert", { orderId: selectedOrder?.id, template: pdfTarget });
-    appendOrderEvent(selectedOrder?.id, `${pdfTarget} erstellt`);
-    showNotice("PDF-Dokument wurde intern gespeichert. Eine Kundenfreigabe ist noch erforderlich.");
+  const startPdfDocument = (type = "Montageprotokoll", orderId = selectedOrder?.id) => {
+    const order = visibleOrders.find((item) => item.id === orderId);
+    if (!canCreateDocuments || !order) { showNotice("Bitte zuerst einen berechtigten Auftrag auswählen."); return false; }
+    setSelectedOrderId(order.id);
+    setPdfTarget(type);
+    setSelectedPdfDocumentId("");
+    setDocumentEditorRequest(Date.now());
+    setActive("documents");
+    return true;
+  };
+  const openPdfDocument = (document) => {
+    const normalized = normalizePdfDocument(document);
+    if (normalized.orderId && visibleOrders.some((order) => order.id === normalized.orderId)) setSelectedOrderId(normalized.orderId);
+    setPdfTarget(normalized.type);
+    setSelectedPdfDocumentId(normalized.id);
+    setDocumentEditorRequest(Date.now());
+    setActive("documents");
+    return true;
+  };
+  const persistPdfDocument = (document, action, immediate = false) => {
+    setPdfDocuments((docs) => [document, ...docs.filter((item) => item.id !== document.id)]);
+    addToSyncQueue(action, { recordId: document.id, orderId: document.orderId, document }, { type: "pdfMetadata", recordId: document.id, immediate });
+    appendOrderEvent(document.orderId, `${document.title} · ${action}`);
+  };
+  const savePdfDocument = (status = "Erstellt") => {
+    if (!canCreateDocuments || !selectedOrder) { showNotice("Dokumente müssen mit einem berechtigten Auftrag verbunden sein."); return null; }
+    const doc = selectedPdfDocument
+      ? updateDocumentRecord(selectedPdfDocument, { company, fields: currentPdfValues, order: selectedOrder, productName: selectedProduct.name, signatures: currentPdfSignatures, status, updatedBy: authUser?.name || "Nutzer" })
+      : createDocumentRecord({ company, createdBy: authUser?.name || "Nutzer", customerId: selectedOrder.customerPersonId, documents: pdfDocuments, fields: currentPdfValues, order: selectedOrder, productName: selectedProduct.name, signatures: currentPdfSignatures, status, type: pdfTarget });
+    persistPdfDocument(doc, selectedPdfDocument ? "Dokument bearbeitet" : status === "Entwurf" ? "Dokumententwurf gespeichert" : "PDF-Dokument erstellt", status !== "Entwurf");
+    setSelectedPdfDocumentId(doc.id);
+    setPdfFormData((current) => { const next = { ...current }; delete next[currentPdfDraftKey]; return next; });
+    showNotice(offline ? "Dokument lokal gespeichert. Synchronisierung folgt später." : `Dokument ${doc.documentNumber} wurde gespeichert.`);
+    return doc;
   };
   const updatePdfDocumentStatus = (id, status) => {
-    setPdfDocuments((docs) => docs.map((doc) => doc.id === id ? { ...doc, status } : doc));
-    addToSyncQueue("PDF-Dokumentstatus geändert", { recordId: id, status }, { type: "pdfMetadata", recordId: id });
     const document = pdfDocuments.find((item) => item.id === id);
-    appendOrderEvent(document?.orderId, `Dokumentstatus auf ${status} gesetzt`);
+    if (!document || !canCreateDocuments) return;
+    if (!isCompanyAdmin && (document.customerVisible || ["Freigegeben", "Archiviert"].includes(document.status) || ["Freigegeben", "Archiviert"].includes(status))) return;
+    const next = addDocumentHistory(document, `Status auf ${status} gesetzt`, authUser?.name, { status });
+    persistPdfDocument(next, "PDF-Dokumentstatus geändert", true);
   };
   const updateCustomerDocumentVisibility = (id, customerVisible) => {
     if (!canManageOrders) return;
-    const visibleAt = customerVisible ? new Date().toISOString() : "";
-    setPdfDocuments((docs) => docs.map((doc) => doc.id === id ? { ...doc, customerVisible, customerVisibleAt: visibleAt, customerStatus: customerVisible ? "verfügbar" : "wartet auf Freigabe" } : doc));
     const document = pdfDocuments.find((item) => item.id === id);
-    addToSyncQueue(customerVisible ? "Dokument für Kunden freigegeben" : "Dokumentfreigabe zurückgenommen", { recordId: id, orderId: document?.orderId || "", customerVisible }, { type: "pdfMetadata", recordId: id, immediate: true });
-    appendOrderEvent(document?.orderId, customerVisible ? `${document?.template || "Dokument"} für Kunden freigegeben` : "Kundenfreigabe eines Dokuments zurückgenommen");
+    if (!document) return;
+    const visibleAt = customerVisible ? new Date().toISOString() : "";
+    const next = addDocumentHistory(document, customerVisible ? "Für Kunden freigegeben" : "Kundenfreigabe zurückgezogen", authUser?.name, { customerVisible, customerVisibleAt: visibleAt, customerStatus: customerVisible ? "verfügbar" : "wartet auf Freigabe", status: customerVisible && document.status === "Erstellt" ? "Freigegeben" : document.status });
+    persistPdfDocument(next, customerVisible ? "Dokument für Kunden freigegeben" : "Dokumentfreigabe zurückgenommen", true);
     showNotice(customerVisible ? "Dokument ist jetzt im Kundenportal sichtbar." : "Dokument ist nicht mehr im Kundenportal sichtbar.");
+  };
+  const duplicatePdfDocument = (document) => {
+    if (!canCreateDocuments) return null;
+    const order = visibleOrders.find((item) => item.id === document.orderId);
+    if (!order) return null;
+    const copy = duplicateDocumentRecord(document, { documents: pdfDocuments, order, createdBy: authUser?.name || "Nutzer" });
+    persistPdfDocument(copy, "Dokument dupliziert", true);
+    setSelectedOrderId(order.id);
+    setPdfTarget(copy.type);
+    setSelectedPdfDocumentId(copy.id);
+    setDocumentEditorRequest(Date.now());
+    showNotice("Dokument wurde als neuer Entwurf dupliziert.");
+    return copy;
+  };
+  const archivePdfDocument = (document) => {
+    if (!canArchiveDocuments || document.status === "Archiviert") return;
+    if (!window.confirm(`${document.title} archivieren? Das Dokument wird nicht gelöscht.`)) return;
+    const next = addDocumentHistory(document, "Dokument archiviert", authUser?.name, { status: "Archiviert", customerVisible: false, customerVisibleAt: "", customerStatus: "archiviert" });
+    persistPdfDocument(next, "PDF-Dokument archiviert", true);
+    showNotice("Dokument wurde archiviert.");
   };
   const updateOrderById = (orderId, changes) => setOrders((list) => list.map((order) => order.id === orderId ? { ...order, ...changes, updatedAt: new Date().toLocaleString("de-DE") } : order));
   const saveCustomerPortalAction = (type, orderId, payload, label, syncType) => {
@@ -1035,6 +1032,14 @@ export default function App() {
     name: row.name,
     contactPhone: row.contact_phone || row.contactPhone || "",
     contactEmail: row.contact_email || row.contactEmail || "",
+    street: row.street || "",
+    postalCode: row.postal_code || row.postalCode || "",
+    city: row.city || "",
+    phone: row.phone || "",
+    email: row.email || "",
+    website: row.website || "",
+    logoDataUrl: row.logo_data || row.logoDataUrl || "",
+    documentFooter: row.document_footer || row.documentFooter || "",
     createdAt: row.created_at ? new Date(row.created_at).toLocaleString("de-DE") : company.createdAt,
   });
   const companyToRow = (data, userId) => ({
@@ -1042,6 +1047,14 @@ export default function App() {
     name: data.name,
     contact_phone: data.contactPhone || "",
     contact_email: data.contactEmail || "",
+    street: data.street || "",
+    postal_code: data.postalCode || "",
+    city: data.city || "",
+    phone: data.phone || "",
+    email: data.email || "",
+    website: data.website || "",
+    logo_data: data.logoDataUrl || "",
+    document_footer: data.documentFooter || "",
     owner_id: userId || null,
   });
   const personToRow = (person, companyId) => ({
@@ -1106,7 +1119,7 @@ export default function App() {
     if (snapshot.manualQuality) setManualQuality(snapshot.manualQuality);
     if (snapshot.photos && typeof snapshot.photos === "object") setPhotos(snapshot.photos);
     if (snapshot.photoAnalyses) setPhotoAnalyses(snapshot.photoAnalyses);
-    if (snapshot.pdfDocuments) setPdfDocuments(snapshot.pdfDocuments);
+    if (snapshot.pdfDocuments) setPdfDocuments(snapshot.pdfDocuments.map(normalizePdfDocument));
     if (snapshot.moduleChecks) setModuleChecks(snapshot.moduleChecks);
     if (Array.isArray(snapshot.partRequests)) setPartRequests(snapshot.partRequests);
     if (snapshot.learningProgress && typeof snapshot.learningProgress === "object") setLearningProgress(snapshot.learningProgress);
@@ -1167,12 +1180,14 @@ export default function App() {
     const personalLearningItems = allSyncItems.filter((item) => learningTypes.has(item.type));
     const customerPortalItems = customerRole ? allSyncItems.filter((item) => CUSTOMER_SYNC_TYPES.has(item.type)) : [];
     const assignedOrderItems = assignedFieldRole ? allSyncItems.filter((item) => ["order", "planning"].includes(item.type)) : [];
-    const hasPersonalChanges = personalLearningItems.length || assignedOrderItems.length;
+    const personalDocumentItems = allSyncItems.filter((item) => item.type === "pdfMetadata");
+    const hasPersonalChanges = personalLearningItems.length || assignedOrderItems.length || personalDocumentItems.length;
     const syncItems = customerRole
       ? customerPortalItems
       : personalLearningRole
-      ? (hasPersonalChanges ? allSyncItems.filter((item) => learningTypes.has(item.type) || ["order", "planning", "snapshot"].includes(item.type)) : [])
+      ? (hasPersonalChanges ? allSyncItems.filter((item) => learningTypes.has(item.type) || ["order", "planning", "snapshot", "pdfMetadata"].includes(item.type)) : [])
       : allSyncItems;
+    const documentItems = syncItems.filter((item) => item.type === "pdfMetadata");
     const syncItemIds = syncItems.map((item) => item.id);
     if (!syncItemIds.length && !overrideCompany && !options.forceSnapshot) return true;
 
@@ -1230,6 +1245,13 @@ export default function App() {
           snapshotRow: { company_id: activeCompany.id, snapshot, updated_at: timestamp },
         });
       }
+      if (!customerRole && documentItems.length) {
+        const changedDocumentIds = new Set(documentItems.map((item) => item.recordId));
+        await saveOrderDocuments({
+          client: supabase,
+          documentRows: pdfDocuments.filter((document) => changedDocumentIds.has(document.id)).map((document) => documentToRow(document, activeCompany.id)),
+        });
+      }
       const syncedAt = new Date().toISOString();
       setLastSyncedAt(syncedAt);
       setSyncError("");
@@ -1258,7 +1280,7 @@ export default function App() {
     try {
       const isCustomerAccount = targetRole === "kunde";
       const preserveLocalChanges = !isCustomerAccount && getQueueSummary(syncQueueRef.current).unsynced > 0;
-      const { absenceErrorMessage, learningRecord, learningRecordError, remoteAbsences, snap, portalData, portalErrorMessage, remotePeople, remoteOrders } = await withTimeout((async () => {
+      const { absenceErrorMessage, documentErrorMessage, learningRecord, learningRecordError, remoteAbsences, remoteDocuments, snap, portalData, portalErrorMessage, remotePeople, remoteOrders } = await withTimeout((async () => {
         let snap = null;
         let portalData = null;
         let portalErrorMessage = "";
@@ -1266,6 +1288,8 @@ export default function App() {
         let absenceErrorMessage = "";
         let learningRecord = null;
         let learningRecordError = "";
+        let remoteDocuments = null;
+        let documentErrorMessage = "";
         if (isCustomerAccount) {
           const { data, error } = await supabase.rpc("get_customer_portal_data", { p_company_id: companyId });
           portalData = data || null;
@@ -1297,8 +1321,13 @@ export default function App() {
               learningRecordError = error.message || "Persönlicher Lernstand konnte nicht geladen werden.";
             }
           }
+          try {
+            remoteDocuments = await loadOrderDocuments({ client: supabase, companyId });
+          } catch (error) {
+            documentErrorMessage = error.message || "Dokumente konnten nicht aus der Cloud geladen werden.";
+          }
         }
-        return { absenceErrorMessage, learningRecord, learningRecordError, remoteAbsences, snap, portalData, portalErrorMessage, remotePeople, remoteOrders };
+        return { absenceErrorMessage, documentErrorMessage, learningRecord, learningRecordError, remoteAbsences, remoteDocuments, snap, portalData, portalErrorMessage, remotePeople, remoteOrders };
       })());
       if (isCustomerAccount) {
         if (portalErrorMessage) throw new Error("Kundenportal konnte nicht sicher geladen werden.");
@@ -1313,12 +1342,14 @@ export default function App() {
         if (remotePeople?.length) setCompanyPeople(remotePeople.map(rowToPerson));
         if (remoteOrders?.length) setOrders(remoteOrders.map((row) => row.data));
         if (Array.isArray(remoteAbsences)) setPlanningAbsences(remoteAbsences.map(rowToAbsence));
+        if (Array.isArray(remoteDocuments)) setPdfDocuments(remoteDocuments.map(rowToDocument));
         if (learningRecord && targetPersonId) applyPersonalLearningRecord(targetPersonId, learningRecord);
       } else {
         addSyncLog("Lokale Änderungen vor Cloud-Stand priorisiert");
       }
       if (learningRecordError) addSyncLog(`Persönlicher Lern-Sync nicht verfügbar: ${learningRecordError}`, "fehler");
       if (absenceErrorMessage) addSyncLog(`Planungs-Sync nicht verfügbar: ${absenceErrorMessage}`, "fehler");
+      if (documentErrorMessage) addSyncLog(`Dokumenten-Sync nicht verfügbar: ${documentErrorMessage}`, "fehler");
       if (!preserveLocalChanges) setLastSyncedAt(new Date().toISOString());
       setSyncError("");
       addSyncLog("Supabase geladen");
@@ -1683,7 +1714,15 @@ Kopie/Nachfolgeauftrag aus ${selectedOrder.id}`.trim(), statusHistory: [{ status
   const updatePhotoNote = (category, note) => { if (!selectedOrder) return; setPhotos((current) => ({ ...current, [selectedOrder.id]: { ...(current[selectedOrder.id] || {}), [category]: { ...(current[selectedOrder.id]?.[category] || {}), note } } })); };
   const toggleQuality = (id) => { if (!selectedOrder) return; setManualQuality((current) => ({ ...current, [selectedOrder.id]: { ...(current[selectedOrder.id] || {}), [id]: !current[selectedOrder.id]?.[id] } })); addToSyncQueue("Abschlussprüfung geändert", { orderId: selectedOrder.id, id }); };
   const setQualityValue = (id, value) => { if (!selectedOrder) return; setManualQuality((current) => ({ ...current, [selectedOrder.id]: { ...(current[selectedOrder.id] || {}), [id]: value } })); addToSyncQueue("Abschlussentscheidung geändert", { orderId: selectedOrder.id, id, value }); };
-  const completeSelectedOrder = () => { if (!selectedOrder) return; if (!closeReady) { showNotice(`${unresolvedQuality.length} Pflichtpunkt${unresolvedQuality.length === 1 ? " fehlt" : "e fehlen"}.`); return; } updateSelectedOrderStatus("Erledigt", "Abschlussprüfung vollständig"); };
+  const completeSelectedOrder = () => {
+    if (!selectedOrder) return;
+    if (!closeReady) { showNotice(`${unresolvedQuality.length} Pflichtpunkt${unresolvedQuality.length === 1 ? " fehlt" : "e fehlen"}.`); return; }
+    const completedOrderId = selectedOrder.id;
+    updateSelectedOrderStatus("Erledigt", "Abschlussprüfung vollständig");
+    window.setTimeout(() => {
+      if (window.confirm("Auftrag abgeschlossen. Jetzt ein Montageprotokoll aus den vorhandenen Auftragsdaten vorbereiten?")) startPdfDocument("Montageprotokoll", completedOrderId);
+    }, 0);
+  };
   const applyReportTemplate = () => { setReportText(selectedReportTemplate.text); showNotice("Vorlage wurde übernommen."); };
   const importChecklistIntoReport = () => { const text = reportCheckedItems.length ? `Erledigte Checklistenpunkte: ${reportCheckedItems.join(", ")}.` : `Beim Auftrag ${selectedOrder?.id || ""} wurden noch keine Checklistenpunkte abgehakt.`; setReportText((current) => `${current}\n${text}`.trim()); showNotice("Checkliste wurde übernommen."); };
   const addPhotoNoteToReport = () => { const photoNames = Object.keys(orderPhotos); const text = photoNames.length ? `Fotodokumentation erstellt: ${photoNames.join(", ")}.` : "Fotodokumentation wurde vorbereitet, aber noch keine Fotos hinzugefügt."; setReportText((current) => `${current}\n${text}`.trim()); showNotice("Foto-Notiz eingefügt."); };
@@ -1898,6 +1937,7 @@ Kopie/Nachfolgeauftrag aus ${selectedOrder.id}`.trim(), statusHistory: [{ status
     order: selectedOrder,
     product: selectedProduct,
     companyPeople,
+    canCreateDocuments,
     canManage: canManageOrders,
     canEditWork: canEditOrderWork,
     canOpenModule,
@@ -1930,12 +1970,17 @@ Kopie/Nachfolgeauftrag aus ${selectedOrder.id}`.trim(), statusHistory: [{ status
       saveDiagnosis: saveDiagnosisToOrder,
       createLearningCase: () => createLearningPracticeCaseFromOrder(selectedOrder, learningUserId),
       updateCustomerEntry,
+      createDocument: (type) => startPdfDocument(type, selectedOrder.id),
+      openDocument: openPdfDocument,
+      duplicateDocument: duplicatePdfDocument,
+      setDocumentVisibility: updateCustomerDocumentVisibility,
+      archiveDocument: archivePdfDocument,
     },
     panels: {
       sketches: <SketchesPage checkButton={checkButton} deleteSketch={deleteSketchRecord} orders={visibleOrders} saveSketch={saveSketchRecord} savedSketches={(Array.isArray(savedSketches) ? savedSketches : []).filter((sketch) => !sketch.orderId || sketch.orderId === selectedOrder.id)} selectedOrderId={selectedOrder.id} setSketchImage={setSketchImage} showNotice={showNotice} sketchImage={sketchImage} />,
       diagnosis: <DiagnosisPage {...diagnosisPageProps} />,
       parts: <PartsPage checkButton={checkButton} loadPartRequestDraft={loadPartRequestDraft} mode={partMode} moduleChecks={moduleChecks} newPartRequestDraft={newPartRequestDraft} notes={technicalNotes} onAnalyzeNameplate={openNameplateAssistant} onNoteChange={updateTechnicalNote} onSetOrderWaitingMaterial={setOrderWaitingForMaterial} onUse={recordTechnicalUse} orders={visibleOrders} partPhotoRequirements={partPhotoRequirements} partPhotoScope={partPhotoScope} partQuery={partQuery} partRequest={partRequest} partRequests={orderPartRequests} partRequestText={partRequestText} savePartRequestDraft={savePartRequestDraft} selectedOrder={selectedOrder} setMode={setPartMode} setPartQuery={setPartQuery} setPartRequest={setPartRequest} updatePartRequestStatus={updatePartRequestStatus} />,
-      completion: (openArea) => <CloseOrderPage closeReady={closeReady} closingGroups={closingGroups} closingValues={closingValues} completionNote={selectedOrder.completionNote || ""} completeSelectedOrder={completeSelectedOrder} createReworkOrder={() => createReworkOrder({ keepSourceSelected: true })} missingClosingItems={unresolvedQuality} openArea={openArea} selectedChecklistProgress={selectedChecklistProgress} selectedOrder={selectedOrder} selectedProduct={selectedProduct} setQualityValue={setQualityValue} startPartRequest={() => startPartRequestForSelectedOrder(false)} toggleQuality={toggleQuality} updateCompletionNote={(value) => updateSelectedOrder({ completionNote: value })} />,
+      completion: () => <CloseOrderPage closeReady={closeReady} closingGroups={closingGroups} closingValues={closingValues} completionNote={selectedOrder.completionNote || ""} completeSelectedOrder={completeSelectedOrder} createReworkOrder={() => createReworkOrder({ keepSourceSelected: true })} missingClosingItems={unresolvedQuality} openArea={(target) => target === "pdf" ? startPdfDocument("Montageprotokoll", selectedOrder.id) : openOrderTechnicalArea(target)} selectedChecklistProgress={selectedChecklistProgress} selectedOrder={selectedOrder} selectedProduct={selectedProduct} setQualityValue={setQualityValue} startPartRequest={() => startPartRequestForSelectedOrder(false)} toggleQuality={toggleQuality} updateCompletionNote={(value) => updateSelectedOrder({ completionNote: value })} />,
     },
   } : null;
 
@@ -1976,7 +2021,7 @@ Kopie/Nachfolgeauftrag aus ${selectedOrder.id}`.trim(), statusHistory: [{ status
     <div className={`mx-auto grid max-w-[1600px] gap-5 ${device.isMobile ? "" : sidebarCollapsed ? "grid-cols-[78px_minmax(0,1fr)]" : "grid-cols-[270px_minmax(0,1fr)]"}`}>
       {!device.isMobile && <DesktopSidebar active={active} collapsed={sidebarCollapsed} groups={roleNavigationGroups} onLogout={logoutSupabase} onNavigate={navigateTo} onToggleCollapsed={() => setSidebarCollapsed((value) => !value)} />}
       <main className="min-w-0">
-        <TopBar role={appRole} setRole={setRole} offline={offline} pendingSyncCount={pendingSyncCount} failedSyncCount={failedSyncCount} lastSyncedAt={lastSyncedAt} syncError={syncError} syncing={syncing} onRetrySync={retrySync} compact={device.isMobile} currentUser={authUser} search={<GlobalSearch items={visibleNavigationItems} onNavigate={navigateTo} onOpenOrder={openSearchOrder} orders={appRole === "kunde" ? currentCustomerOrders : visibleOrders} />} />
+        <TopBar role={appRole} setRole={setRole} offline={offline} pendingSyncCount={pendingSyncCount} failedSyncCount={failedSyncCount} lastSyncedAt={lastSyncedAt} syncError={syncError} syncing={syncing} onRetrySync={retrySync} compact={device.isMobile} currentUser={authUser} search={<GlobalSearch documents={appRole === "kunde" ? currentCustomerDocuments : visiblePdfDocuments} items={visibleNavigationItems} onNavigate={navigateTo} onOpenDocument={appRole === "kunde" ? () => navigateTo("customerDocuments") : openPdfDocument} onOpenOrder={openSearchOrder} orders={appRole === "kunde" ? currentCustomerOrders : visibleOrders} />} />
         {notice && <div className="mb-4 rounded-2xl bg-emerald-50 p-3 text-sm font-bold text-emerald-800">{notice}</div>}
         <Header role={appRole} orders={appRole === "kunde" ? currentCustomerOrders : visibleOrders} selectedOrder={appRole === "kunde" ? currentCustomerOrders.find((order) => order.id === selectedOrder?.id) : selectedOrder} compact={device.isMobile} moduleCount={visibleNavigationItems.length} />
         <QuickAccessBar favorites={navigationFavorites} items={visibleNavigationItems} onNavigate={navigateTo} onToggleFavorite={toggleNavigationFavorite} />
@@ -1985,7 +2030,7 @@ Kopie/Nachfolgeauftrag aus ${selectedOrder.id}`.trim(), statusHistory: [{ status
     {active === "today" && screen(<PlanningPage absences={planningAbsences} appRole={appRole} currentPerson={currentPerson} initialTab="today" offline={offline} onCreateAbsence={createPlanningAbsenceEntry} onCreateLearningCase={createLearningPracticeCaseFromOrder} onDeleteAbsence={deletePlanningAbsence} onOpenOrder={openPlanningOrder} onOpenOrderArea={openPlanningOrderArea} onStartOrder={startPlanningOrder} onUpdateOrder={updatePlanningOrder} orders={orders} partRequests={partRequests} pendingOrderIds={pendingPlanningOrderIds} people={companyPeople} todayOnly />)}
     {active === "orders" && screen(<OrdersPage addOrder={addOrder} canCreate={canManageOrders} canManage={canManageOrders} deleteSelectedOrder={deleteSelectedOrder} detailProps={orderDetailProps} filteredOrders={filteredOrders} newOrder={newOrder} newOrderChecklistPreview={newOrderChecklistPreview} newOrderProduct={newOrderProduct} orderOpenCounts={orderOpenCounts} orderSearch={orderSearch} selectedOrder={selectedOrder} selectedOrderId={selectedOrderId} setNewOrder={setNewOrder} setOrderSearch={setOrderSearch} setSelectedOrderId={setSelectedOrderId} />)}
     {active === "workflow" && screen(<WorkflowPage archiveSelectedOrder={archiveSelectedOrder} canOpenModule={canOpenModule} createOrderFromWorkflowTemplate={createOrderFromWorkflowTemplate} createReworkOrder={createReworkOrder} currentOrderHistory={currentOrderHistory} duplicateSelectedOrder={duplicateSelectedOrder} orderWorkflowTemplates={orderWorkflowTemplates} selectedOrder={selectedOrder} selectedProduct={selectedProduct} selectedWorkflowTemplate={selectedWorkflowTemplate} setActive={setActive} setWorkflowTemplateId={setWorkflowTemplateId} workflowStages={workflowStages} workflowTemplateId={workflowTemplateId} />)}
-    {active === "closeOrder" && screen(<CloseOrderPage closeReady={closeReady} closingGroups={closingGroups} closingValues={closingValues} completionNote={selectedOrder?.completionNote || ""} completeSelectedOrder={completeSelectedOrder} createReworkOrder={() => createReworkOrder({ keepSourceSelected: true })} missingClosingItems={unresolvedQuality} openArea={setActive} selectedChecklistProgress={selectedChecklistProgress} selectedOrder={selectedOrder} selectedProduct={selectedProduct} setQualityValue={setQualityValue} startPartRequest={startPartRequestForSelectedOrder} toggleQuality={toggleQuality} updateCompletionNote={(value) => updateSelectedOrder({ completionNote: value })} />)}
+    {active === "closeOrder" && screen(<CloseOrderPage closeReady={closeReady} closingGroups={closingGroups} closingValues={closingValues} completionNote={selectedOrder?.completionNote || ""} completeSelectedOrder={completeSelectedOrder} createReworkOrder={() => createReworkOrder({ keepSourceSelected: true })} missingClosingItems={unresolvedQuality} openArea={(target) => target === "pdf" ? startPdfDocument("Montageprotokoll", selectedOrder?.id) : setActive(target)} selectedChecklistProgress={selectedChecklistProgress} selectedOrder={selectedOrder} selectedProduct={selectedProduct} setQualityValue={setQualityValue} startPartRequest={startPartRequestForSelectedOrder} toggleQuality={toggleQuality} updateCompletionNote={(value) => updateSelectedOrder({ completionNote: value })} />)}
     {active === "products" && screen(<ProductLexiconPage checkButton={checkButton} moduleChecks={moduleChecks} selectedOrder={selectedOrder} selectedProduct={selectedProduct} />)}
   {active === "checklists" && screen(<OrderChecklist canEdit={canEditOrderWork} checks={checks[selectedOrder?.id] || {}} items={selectedChecklistItems} onProductChange={updateSelectedOrderProduct} onToggle={toggleCheck} order={selectedOrder} product={selectedProduct} />)}
     {active === "tools" && screen(<ToolsPage checkButton={checkButton} markScopeDone={markScopeDone} moduleChecks={moduleChecks} selectedOrder={selectedOrder} selectedProduct={selectedProduct} />)}
@@ -2002,10 +2047,10 @@ Kopie/Nachfolgeauftrag aus ${selectedOrder.id}`.trim(), statusHistory: [{ status
     {active === "maintenance" && screen(<MaintenancePage checkButton={checkButton} moduleChecks={moduleChecks} selectedOrder={selectedOrder} selectedProduct={selectedProduct} />)}
     {(active === "learning" || active === "quiz" || active === "azubiPlan") && screen(<LearningPage appRole={appRole} canViewTeam={canViewLearningTeam} companyPeople={companyPeople} currentLearnerId={learningUserId} currentPerson={currentPerson} initialView={active === "quiz" ? "quiz" : active === "azubiPlan" ? "progress" : "overview"} learningAssignments={learningAssignments} learningComments={learningComments} learningLists={learningLists} learningProgress={learningProgress} myReports={myReports} onCreatePracticeCaseFromOrder={createLearningPracticeCaseFromOrder} onOpenRelated={(target) => navigateTo(target === "diagnosis" ? "diagnose" : target)} onOpenReportBook={openLearningReportBook} onPrepareLearningReport={prepareLearningReport} onQuizAnswer={saveQuizAnswer} onReviewLearningReport={reviewLearningReport} onSaveLearningAssignment={saveLearningAssignment} onSaveLearningComment={saveLearningComment} onSavePracticeCase={saveLearningPracticeCase} onToggleLearningList={toggleLearningList} onUpdateLearningAssignment={updateLearningAssignment} onUpdateLearningComment={updateLearningComment} orders={visibleOrders} practiceCases={learningPracticeCases} quizProgress={quizProgress} updateLearningProgress={updateLearningProgress} />)}
     {active === "knowledge" && screen(<SketchesPage checkButton={checkButton} deleteSketch={deleteSketchRecord} orders={visibleOrders} saveSketch={saveSketchRecord} savedSketches={Array.isArray(savedSketches) ? savedSketches : []} selectedOrderId={selectedOrder?.id || selectedOrderId} setSketchImage={setSketchImage} showNotice={showNotice} sketchImage={sketchImage} />)}
-  {active === "reportBook" && screen(<ReportBookPage canReview={canViewLearningTeam} onAddPhotoNote={addPhotoNoteToReport} onApplyTemplate={applyReportTemplate} onApproveLatest={approveLatestReport} onDelete={deleteReport} onExport={exportCurrentReport} onGenerateWeekly={generateWeeklyReport} onImportChecklist={importChecklistIntoReport} onSave={saveReportEntry} onSelectPdf={() => setPdfTarget("Berichtsheft-Eintrag")} reportExportText={reportExportText} reportLearningField={reportLearningField} reportMasterComment={reportMasterComment} reportMode={reportMode} reportProposal={reportProposal} reportReminder={reportReminder} reportStatus={reportStatus} reportTechnicalTerms={reportTerms} reportTemplateId={reportTemplateId} reportText={reportText} reportYear={reportYear} reports={myReports} setReportExportText={setReportExportText} setReportLearningField={setReportLearningField} setReportMasterComment={setReportMasterComment} setReportMode={setReportMode} setReportReminder={setReportReminder} setReportStatus={setReportStatus} setReportTemplateId={setReportTemplateId} setReportText={setReportText} setReportYear={setReportYear} showNotice={showNotice} />)}
+  {active === "reportBook" && screen(<ReportBookPage canReview={canViewLearningTeam} onAddPhotoNote={addPhotoNoteToReport} onApplyTemplate={applyReportTemplate} onApproveLatest={approveLatestReport} onDelete={deleteReport} onExport={exportCurrentReport} onGenerateWeekly={generateWeeklyReport} onImportChecklist={importChecklistIntoReport} onSave={saveReportEntry} onSelectPdf={() => startPdfDocument("Berichtsheft-Eintrag", selectedOrder?.id)} reportExportText={reportExportText} reportLearningField={reportLearningField} reportMasterComment={reportMasterComment} reportMode={reportMode} reportProposal={reportProposal} reportReminder={reportReminder} reportStatus={reportStatus} reportTechnicalTerms={reportTerms} reportTemplateId={reportTemplateId} reportText={reportText} reportYear={reportYear} reports={myReports} setReportExportText={setReportExportText} setReportLearningField={setReportLearningField} setReportMasterComment={setReportMasterComment} setReportMode={setReportMode} setReportReminder={setReportReminder} setReportStatus={setReportStatus} setReportTemplateId={setReportTemplateId} setReportText={setReportText} setReportYear={setReportYear} showNotice={showNotice} />)}
   {active === "safety" && screen(<div className="grid gap-5 lg:grid-cols-[0.8fr_1.2fr]"><Card><SectionTitle icon={AlertTriangle} title="Sicherheits- und Warnsystem" subtitle="Kritische Kombinationen werden sichtbar gemacht." /><div className="space-y-3">{["WDVS: Lastabtragung und Abdichtung prüfen", "Markise: hohe Hebel- und Zugkräfte", "Elektro: Spannungsfreiheit und fachgerechte Messung", "Wind: Herstellerangaben und Sensorik beachten"].map((w) => <div key={w} className="rounded-2xl bg-amber-50 p-4 text-sm font-bold text-amber-900">{w}</div>)}</div></Card><Card><SectionTitle icon={ShieldCheck} title="Warnhinweise" subtitle="Nicht als automatische Freigabe nutzen." /><p className="text-sm leading-6 text-slate-600">Herstellerangaben, Untergrund, Befestigung, Gebäudehöhe und Fachprüfung bleiben verbindlich.</p></Card></div>)}
     {active === "norms" && screen(<NormsPage checkButton={checkButton} moduleChecks={moduleChecks} selectedOrder={selectedOrder} selectedProduct={selectedProduct} />)}
-    {(active === "pdf" || active === "documents") && screen(<PdfExportPage canManageCustomerDocuments={canManageOrders} currentPdfTemplate={currentPdfTemplate} getPdfValue={getPdfValue} pdfDocuments={pdfDocuments} pdfFileName={pdfFileName} pdfPreviewLines={pdfPreviewLines} pdfTarget={pdfTarget} pdfTemplateDefinitions={pdfTemplateDefinitions} resetPdfTemplate={resetPdfTemplate} savePdfDocument={savePdfDocument} selectedOrder={selectedOrder} selectedProduct={selectedProduct} setPdfField={setPdfField} setPdfTarget={setPdfTarget} updateCustomerDocumentVisibility={updateCustomerDocumentVisibility} updatePdfDocumentStatus={updatePdfDocumentStatus} />)}
+    {(active === "pdf" || active === "documents") && screen(<PdfExportPage archivePdfDocument={archivePdfDocument} canArchiveDocuments={canArchiveDocuments} canCreateDocuments={canCreateDocuments} canManageCustomerDocuments={canManageOrders} company={company} currentPdfSignatures={currentPdfSignatures} currentPdfTemplate={currentPdfTemplate} currentPdfValues={currentPdfValues} documentCompleteness={documentCompleteness} documentEditorRequest={documentEditorRequest} duplicatePdfDocument={duplicatePdfDocument} lastSyncedAt={lastSyncedAt} openPdfDocument={openPdfDocument} orderPhotos={orderPhotos} orders={visibleOrders} pdfDocuments={visiblePdfDocuments} pdfFileName={pdfFileName} pdfPreviewLines={pdfPreviewLines} pdfTarget={pdfTarget} resetPdfTemplate={resetPdfTemplate} savePdfDocument={savePdfDocument} savedSketches={Array.isArray(savedSketches) ? savedSketches : []} selectedOrder={selectedOrder} selectedPdfDocument={selectedPdfDocument} selectedProduct={selectedProduct} setPdfField={setPdfField} setPdfSignature={setPdfSignature} startPdfDocument={startPdfDocument} syncQueue={syncQueue} updateCustomerDocumentVisibility={updateCustomerDocumentVisibility} updatePdfDocumentStatus={updatePdfDocumentStatus} />)}
     {active === "rights" && screen(<RightsPage navItems={navigationItems} />)}
   {active === "company" && screen(<CompanyTeamPage canManage={canViewLearningTeam} company={company} companyPeople={companyPeople} createCompanyPerson={createCompanyPerson} onArchivePerson={archivePerson} onRegenerateCode={regeneratePersonCode} onSetPersonStatus={setPersonStatus} onUpdatePerson={updateCompanyPerson} orders={orders} personForm={personForm} personRoleLabel={personRoleLabel} setCompany={setCompany} setPersonForm={setPersonForm} showNotice={showNotice} teamRoleOptions={teamRoleOptions} updateAzubiProgress={updateAzubiProgress} />)}
   {active === "planning" && screen(<PlanningPage absences={planningAbsences} appRole={appRole} currentPerson={currentPerson} offline={offline} onCreateAbsence={createPlanningAbsenceEntry} onCreateLearningCase={createLearningPracticeCaseFromOrder} onDeleteAbsence={deletePlanningAbsence} onOpenOrder={openPlanningOrder} onOpenOrderArea={openPlanningOrderArea} onStartOrder={startPlanningOrder} onUpdateOrder={updatePlanningOrder} orders={orders} partRequests={partRequests} pendingOrderIds={pendingPlanningOrderIds} people={companyPeople} />)}
