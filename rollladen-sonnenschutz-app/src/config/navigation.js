@@ -125,11 +125,11 @@ export const navigationGroups = [
   },
   {
     id: "customerAppointments",
-    label: "Meine Termine & Aufträge",
+    label: "Meine Aufträge",
     icon: CalendarDays,
     customerOnly: true,
     items: [
-      { id: "portal", label: "Meine Termine & Aufträge", shortLabel: "Termine", icon: CalendarDays, roles: ["kunde"], mobilePriority: 2, keywords: ["termin", "auftrag", "status"] },
+      { id: "portal", label: "Meine Aufträge", shortLabel: "Aufträge", icon: CalendarDays, roles: ["kunde"], mobilePriority: 2, keywords: ["termin", "auftrag", "status"] },
     ],
   },
   {
@@ -152,11 +152,11 @@ export const navigationGroups = [
   },
   {
     id: "customerContact",
-    label: "Kontakt / Rückfrage",
+    label: "Kontakt",
     icon: MessageSquareText,
     customerOnly: true,
     items: [
-      { id: "customerContact", label: "Kontakt / Rückfrage", icon: MessageSquareText, roles: ["kunde"], keywords: ["kontakt", "frage", "ansprechpartner"] },
+      { id: "customerContact", label: "Kontakt", shortLabel: "Kontakt", icon: MessageSquareText, roles: ["kunde"], keywords: ["kontakt", "frage", "ansprechpartner", "problem"] },
     ],
   },
 ];

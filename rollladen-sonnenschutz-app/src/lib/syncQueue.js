@@ -44,6 +44,12 @@ export function inferSyncMetadata(action = "Lokale Änderung", data = {}) {
   else if (normalized.includes("ersatzteil")) type = "partRequest";
   else if (normalized.includes("diagnose")) type = "diagnosis";
   else if (normalized.includes("abwesen")) type = "absence";
+  else if (normalized.includes("terminänder") || normalized.includes("kundentermin")) type = "customerAppointment";
+  else if (normalized.includes("kundenrückfrage") || normalized.includes("rückfrage")) type = "customerMessage";
+  else if (normalized.includes("kundenmeldung") || normalized.includes("problem gemeldet")) type = "customerIssue";
+  else if (normalized.includes("kundenfreigabe") || normalized.includes("kenntnisnahme")) type = "customerApproval";
+  else if (normalized.includes("wartung angefragt") || normalized.includes("wartungsanfrage")) type = "maintenanceRequest";
+  else if (normalized.includes("kundenfeedback")) type = "customerFeedback";
   else if (normalized.includes("baustellenplanung") || normalized.includes("eingeplant") || normalized.includes("verschoben")) type = "planning";
   else if (normalized.includes("person") || normalized.includes("team.")) type = "person";
   else if (normalized.includes("firma") || normalized.includes("company")) type = "company";

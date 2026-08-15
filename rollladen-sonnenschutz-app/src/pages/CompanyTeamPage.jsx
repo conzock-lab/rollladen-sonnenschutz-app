@@ -136,12 +136,12 @@ export default function CompanyTeamPage({
     <div className="space-y-5">
       <Card>
         <SectionTitle icon={UserRound} title="Firma & Team" subtitle="Persönliche Zugänge, Rollen und Status zentral verwalten." />
-        <div className="grid gap-4 lg:grid-cols-[1fr_auto] lg:items-end">
+        <div className="grid gap-4 md:grid-cols-3 lg:grid-cols-[1fr_0.8fr_0.8fr] lg:items-end">
           <Field label="Firmenname" value={company.name} onChange={(value) => setCompany({ ...company, name: value })} />
-          <div className="rounded-2xl bg-emerald-50 px-4 py-3 text-xs font-bold leading-5 text-emerald-900 lg:max-w-md">
-            Es gibt ausschließlich persönliche Codes. Kunden sind nach dem Anlegen sofort aktiv und benötigen keine zusätzliche Freigabe.
-          </div>
+          <Field label="Kundentelefon" value={company.contactPhone || ""} onChange={(value) => setCompany({ ...company, contactPhone: value })} placeholder="Für das Kundenportal" />
+          <Field label="Kunden-E-Mail" type="email" value={company.contactEmail || ""} onChange={(value) => setCompany({ ...company, contactEmail: value })} placeholder="Für das Kundenportal" />
         </div>
+        <div className="mt-3 rounded-2xl bg-emerald-50 px-4 py-3 text-xs font-bold leading-5 text-emerald-900">Es gibt ausschließlich persönliche Codes. Kunden sind nach dem Anlegen sofort aktiv und benötigen keine zusätzliche Freigabe.</div>
       </Card>
 
       {canManage && (

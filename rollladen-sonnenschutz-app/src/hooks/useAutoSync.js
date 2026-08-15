@@ -11,6 +11,7 @@ export default function useAutoSync({
   onLocalChange,
   onSync,
   localChangeDebounceMs = 1000,
+  trackLocalChanges = true,
 }) {
   const trackedOwnerRef = useRef("");
   const localChangeRef = useRef(onLocalChange);
@@ -20,7 +21,7 @@ export default function useAutoSync({
   useEffect(() => { syncRef.current = onSync; }, [onSync]);
 
   useEffect(() => {
-    if (!ownerKey || !ready || !enabled) {
+    if (!ownerKey || !ready || !enabled || !trackLocalChanges) {
       trackedOwnerRef.current = "";
       return undefined;
     }
@@ -30,7 +31,7 @@ export default function useAutoSync({
     }
     const timeoutId = window.setTimeout(() => localChangeRef.current?.(), localChangeDebounceMs);
     return () => window.clearTimeout(timeoutId);
-  }, [ownerKey, ready, enabled, changeToken, localChangeDebounceMs]);
+  }, [ownerKey, ready, enabled, trackLocalChanges, changeToken, localChangeDebounceMs]);
 
   useEffect(() => {
     if (!ownerKey || !ready || !enabled || offline || !pendingVersion) return undefined;
