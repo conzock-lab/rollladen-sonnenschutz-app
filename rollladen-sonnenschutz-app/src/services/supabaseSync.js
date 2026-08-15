@@ -104,6 +104,28 @@ export async function saveCustomerPortalChanges({ client, companyId, items, time
   })(), timeoutMs);
 }
 
+export async function saveOrderDocuments({ client, documentRows = [], timeoutMs = 15000 }) {
+  if (!client) throw new Error("Supabase ist nicht konfiguriert.");
+  if (!documentRows.length) return { user: null };
+  return withTimeout((async () => {
+    const { data: authData, error: authError } = await client.auth.getUser();
+    if (authError) throw authError;
+    if (!authData?.user) throw new Error("Keine gültige Cloud-Sitzung gefunden.");
+    const { error } = await client.from("order_documents").upsert(documentRows);
+    if (error) throw error;
+    return { user: authData.user };
+  })(), timeoutMs);
+}
+
+export async function loadOrderDocuments({ client, companyId, timeoutMs = 15000 }) {
+  if (!client || !companyId) return [];
+  return withTimeout((async () => {
+    const { data, error } = await client.from("order_documents").select("*").eq("company_id", companyId).order("updated_at", { ascending: false });
+    if (error) throw error;
+    return data || [];
+  })(), timeoutMs);
+}
+
 export async function saveLearningRecord({ client, learningRow, timeoutMs = 15000 }) {
   if (!client) throw new Error("Supabase ist nicht konfiguriert.");
   return withTimeout((async () => {

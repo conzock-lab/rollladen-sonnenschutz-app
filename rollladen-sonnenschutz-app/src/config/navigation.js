@@ -58,8 +58,7 @@ export const navigationGroups = [
       { id: "checklists", label: "Checklisten", icon: ClipboardCheck, roles: FIELD_ROLES, keywords: ["prüfschritte", "montage", "kontrolle"] },
       { id: "closeOrder", label: "Auftrag abschließen", icon: CheckCircle2, roles: ["dev", "meister", "vorarbeiter", "monteur"], keywords: ["abschluss", "erledigt", "nacharbeit"] },
       { id: "offers", label: "Angebote", icon: Euro, roles: ["dev", "meister", "buero"], keywords: ["angebot", "preis", "kalkulation"] },
-      { id: "pdf", label: "PDF / Protokolle", icon: FileText, roles: ["dev", "meister", "buero", "vorarbeiter", "monteur"], keywords: ["pdf", "protokoll", "druck", "montageprotokoll"] },
-      { id: "documents", label: "Dokumente", icon: Files, roles: ["dev", "meister", "buero", "vorarbeiter", "monteur"], keywords: ["dokument", "archiv", "status"] },
+      { id: "documents", label: "Dokumente", icon: Files, roles: ["dev", "meister", "buero", "vorarbeiter", "monteur", "azubi"], keywords: ["dokument", "pdf", "protokoll", "druck", "montageprotokoll", "archiv", "status"] },
     ],
   },
   {
@@ -163,6 +162,7 @@ export const navigationGroups = [
 
 export const hiddenPages = [
   { id: "workflow", label: "Auftrags-Workflow", icon: ClipboardList, roles: ["dev", "meister", "buero", "vorarbeiter", "monteur"] },
+  { id: "pdf", label: "PDF / Protokolle", icon: FileText, roles: ["dev", "meister", "buero", "vorarbeiter", "monteur", "azubi"] },
 ];
 
 const isAllowed = (entry, role) => role === "dev" || entry.roles?.includes(role);
