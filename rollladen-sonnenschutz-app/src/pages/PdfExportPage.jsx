@@ -1,5 +1,5 @@
 import React from "react";
-import { Copy, Download, FileText, Printer, RefreshCw, Save } from "lucide-react";
+import { Copy, Download, Eye, EyeOff, FileText, Printer, RefreshCw, Save } from "lucide-react";
 import { Badge } from "../components/CheckItem";
 import Card from "../components/Card";
 import { Field, TextArea } from "../components/Field";
@@ -13,6 +13,7 @@ function normalizePdfStatus(status = "Entwurf") {
 }
 
 export default function PdfExportPage({
+  canManageCustomerDocuments,
   currentPdfTemplate,
   getPdfValue,
   pdfDocuments,
@@ -27,6 +28,7 @@ export default function PdfExportPage({
   setPdfField,
   setPdfTarget,
   updatePdfDocumentStatus,
+  updateCustomerDocumentVisibility,
 }) {
   return <div className="space-y-5">
     <Card className="no-print">
@@ -79,6 +81,8 @@ export default function PdfExportPage({
           <select value={normalizePdfStatus(document.status)} onChange={(event) => updatePdfDocumentStatus(document.id, event.target.value)} className="mt-3 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-bold">
             {PDF_STATUSES.map((status) => <option key={status}>{status}</option>)}
           </select>
+          <div className={`mt-3 rounded-2xl p-3 text-xs font-bold ${document.customerVisible ? "bg-emerald-100 text-emerald-950" : "bg-white text-slate-600"}`}>{document.customerVisible ? "Für den Kunden freigegeben" : "Interner Entwurf – nicht im Kundenportal sichtbar"}</div>
+          {canManageCustomerDocuments && <button type="button" onClick={() => updateCustomerDocumentVisibility(document.id, !document.customerVisible)} className={`mt-2 flex min-h-11 w-full items-center justify-center gap-2 rounded-xl px-3 text-xs font-black ${document.customerVisible ? "bg-slate-200 text-slate-800" : "bg-emerald-900 text-white"}`}>{document.customerVisible ? <EyeOff size={17} /> : <Eye size={17} />}{document.customerVisible ? "Freigabe zurücknehmen" : "Für Kunden freigeben"}</button>}
         </article>)}
       </div>
     </Card>

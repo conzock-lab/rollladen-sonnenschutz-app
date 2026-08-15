@@ -2,6 +2,7 @@ import React from "react";
 import { AlertTriangle, BookOpen, Camera, CheckCircle2, Clock3, ExternalLink, MapPin, Move, Phone, Play, UsersRound } from "lucide-react";
 import { Badge } from "../CheckItem";
 import { normalizeOrderStatus } from "../../data/orders";
+import { getCustomerPortalState } from "../../lib/customerPortal";
 
 const priorityClass = {
   dringend: "border-rose-300 bg-rose-50",
@@ -37,6 +38,7 @@ export default function PlanningOrderCard({
   const team = people.filter((person) => (order.assignedMemberIds || []).includes(person.id));
   const addressQuery = order.address ? encodeURIComponent(order.address) : "";
   const canWork = ["dev", "meister", "buero", "vorarbeiter", "monteur"].includes(currentRole);
+  const appointmentRequest = getCustomerPortalState(order).appointmentRequests.find((request) => ["Anfrage gesendet", "wird geprüft", "neuer Termin vorgeschlagen"].includes(request.status));
 
   return <article
     draggable={canPlan}
@@ -58,6 +60,7 @@ export default function PlanningOrderCard({
       <p className="flex items-start gap-2"><Clock3 size={15} className="mt-0.5 shrink-0" />{order.estimatedDuration ? `ca. ${order.estimatedDuration} Std.` : "Dauer nicht geschätzt"}</p>
       <p><span className={`inline-flex rounded-full px-2 py-1 ${materialClass[order.materialStatus] || "bg-slate-100 text-slate-700"}`}>Material: {order.materialStatus || "nicht geprüft"}</span></p>
     </div>
+    {appointmentRequest && <div className="mt-3 rounded-2xl bg-sky-100 p-3 text-xs font-black text-sky-950">Terminänderung angefragt · {appointmentRequest.status}{appointmentRequest.preferredDate ? ` · Wunsch ${appointmentRequest.preferredDate}` : ""}</div>}
 
     {details.materialHint && <p className="mt-2 rounded-xl bg-sky-50 px-3 py-2 text-xs font-bold text-sky-900">{details.materialHint}</p>}
     {(details.openPoints || []).length > 0 && <button type="button" onClick={() => onOpen?.(order)} className="mt-2 flex w-full items-center justify-between rounded-xl bg-amber-50 px-3 py-2 text-left text-xs font-bold text-amber-900"><span>{details.openPoints.length} offene Punkte</span><ExternalLink size={14} /></button>}

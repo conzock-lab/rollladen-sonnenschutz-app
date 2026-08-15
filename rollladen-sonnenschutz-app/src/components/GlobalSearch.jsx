@@ -9,7 +9,7 @@ export default function GlobalSearch({ items, onNavigate, onOpenOrder, orders })
     const term = normalize(query).trim();
     if (term.length < 2) return [];
     const pageResults = items.filter((item) => normalize([item.label, ...(item.keywords || [])].join(" ")).includes(term)).slice(0, 6).map((item) => ({ type: "page", id: item.id, label: item.label, icon: item.icon, meta: "Bereich" }));
-    const orderResults = orders.filter((order) => normalize([order.id, order.customer, order.contact, order.address, order.product, order.notes].join(" ")).includes(term)).slice(0, 4).map((order) => ({ type: "order", id: order.id, label: `${order.id} · ${order.customer}`, icon: BriefcaseBusiness, meta: order.address || "Auftrag" }));
+    const orderResults = orders.filter((order) => normalize([order.id, order.customer, order.contact, order.address, order.product, order.orderType, order.customerNote, order.notes].join(" ")).includes(term)).slice(0, 4).map((order) => ({ type: "order", id: order.id, label: `${order.id} · ${order.customer || order.orderType || "Mein Auftrag"}`, icon: BriefcaseBusiness, meta: order.address || "Auftrag" }));
     return [...pageResults, ...orderResults].slice(0, 8);
   }, [items, orders, query]);
 

@@ -12,6 +12,7 @@ import { ORDER_STATUSES } from "../data/orders";
 import { productTypes } from "../data/products";
 import usePlanningData from "../hooks/usePlanningData";
 import { dateKey } from "../lib/planning";
+import { prepareCustomerAppointmentProposal } from "../lib/customerPortal";
 
 const emptyFilters = { search: "", team: "", person: "", status: "", orderType: "", product: "", priority: "", materialStatus: "" };
 
@@ -55,7 +56,10 @@ export default function PlanningPage({
 
   const saveAssignment = (orderId, changes) => {
     const names = changes.assignedMemberIds.map((id) => people.find((person) => person.id === id)?.name).filter(Boolean).join(", ");
-    onUpdateOrder(orderId, { ...changes, assignedTo: names, status: changes.date ? "Geplant" : "Neu" }, "Baustellenplanung geändert");
+    const sourceOrder = orders.find((order) => order.id === orderId);
+    const proposedOrder = sourceOrder ? prepareCustomerAppointmentProposal(sourceOrder, changes.date, changes.time) : sourceOrder;
+    const customerChanges = proposedOrder && proposedOrder !== sourceOrder ? { customerPortal: proposedOrder.customerPortal, customerConfirmed: false, customerConfirmedAt: "" } : {};
+    onUpdateOrder(orderId, { ...changes, ...customerChanges, assignedTo: names, status: changes.date ? "Geplant" : "Neu" }, proposedOrder !== sourceOrder ? "Neuer Termin für Kunden vorgeschlagen" : "Baustellenplanung geändert");
     setEditingOrder(null);
   };
   const dragStart = (event, order) => event.dataTransfer.setData("text/plain", order.id);

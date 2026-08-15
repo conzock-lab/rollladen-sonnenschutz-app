@@ -1,269 +1,67 @@
 import React, { useEffect, useMemo, useState } from "react";
-import {
-  BriefcaseBusiness,
-  CalendarDays,
-  CheckCircle2,
-  ChevronDown,
-  CircleHelp,
-  FileText,
-  MapPin,
-  RefreshCw,
-  UserRound,
-} from "lucide-react";
-import { Badge } from "../components/CheckItem";
+import { BriefcaseBusiness, Mail, MessageSquareText, Phone, RefreshCw } from "lucide-react";
 import Card from "../components/Card";
-import CopyBox from "../components/CopyBox";
 import SectionTitle from "../components/SectionHeader";
-import { allMaintenanceTips } from "../data/maintenance";
-import { allProductTypes } from "../data/products";
-
-const appointmentTime = (order) => {
-  const value = new Date(`${order.date || "1970-01-01"}T${order.time || "00:00"}`);
-  return Number.isNaN(value.getTime()) ? 0 : value.getTime();
-};
-
-const productName = (productId) => allProductTypes.find((product) => product.id === productId)?.name || "Produkt nicht angegeben";
-
-const contactPerson = (order) => {
-  if (order.contactPerson) return order.contactPerson;
-  const firstAssignedPerson = String(order.assignedTo || "").split(",").map((name) => name.trim()).filter(Boolean)[0];
-  return firstAssignedPerson || "Ihr Kundenservice";
-};
-
-const documentLabel = (document) => document.status || "bereitgestellt";
+import CustomerCareTips from "../components/customer/CustomerCareTips";
+import CustomerDocuments from "../components/customer/CustomerDocuments";
+import CustomerIssueForm from "../components/customer/CustomerIssueForm";
+import CustomerMessageForm from "../components/customer/CustomerMessageForm";
+import CustomerOrderCard from "../components/customer/CustomerOrderCard";
+import CustomerOrderDetails from "../components/customer/CustomerOrderDetails";
+import { getCustomerPortalState } from "../lib/customerPortal";
 
 export default function CustomerPortalPage({
+  company,
   currentCustomerOrders = [],
   customerDocuments = [],
   confirmCustomerAppointment,
+  confirmCustomerApproval,
+  confirmCustomerDocument,
   initialSection = "portal",
-  openCustomerOrder,
+  offline,
+  pendingSyncCount = 0,
+  requestAppointmentChange,
+  saveCustomerIssue,
+  saveCustomerMessage,
+  saveMaintenanceRequest,
+  showNotice,
 }) {
-  const sortedOrders = useMemo(
-    () => {
-      const now = Date.now();
-      return [...currentCustomerOrders].sort((left, right) => {
-        const leftTime = appointmentTime(left);
-        const rightTime = appointmentTime(right);
-        const leftIsPast = leftTime < now;
-        const rightIsPast = rightTime < now;
-        return leftIsPast === rightIsPast ? leftTime - rightTime : leftIsPast ? 1 : -1;
-      });
-    },
-    [currentCustomerOrders],
-  );
-  const [openCareOrderId, setOpenCareOrderId] = useState("");
-  const [questionOrderId, setQuestionOrderId] = useState("");
-  const [questionText, setQuestionText] = useState("");
-  const [preparedQuestion, setPreparedQuestion] = useState("");
-
-  const nextOrder = sortedOrders.find((order) => appointmentTime(order) >= Date.now());
-  const confirmedCount = currentCustomerOrders.filter((order) => order.customerConfirmed).length;
-  const sectionHeading = {
-    customerDocuments: ["Meine Dokumente", "Freigegebene PDFs und Dokumentstatus nach Auftrag."],
-    customerCare: ["Pflegehinweise", "Passende Hinweise zu Ihren Produkten und Anlagen."],
-    customerContact: ["Kontakt & Rückfrage", "Eine Rückfrage vorbereiten, ohne dass automatisch etwas versendet wird."],
-    portal: ["Meine Termine & Aufträge", "Ihre persönliche Übersicht – ohne interne Notizen, Teamdaten oder Verwaltungsbereiche."],
-  }[initialSection] || ["Meine Termine & Aufträge", "Ihre persönliche Übersicht."];
+  const [selectedOrderId, setSelectedOrderId] = useState("");
+  const [maintenanceOrder, setMaintenanceOrder] = useState(null);
+  const [maintenanceForm, setMaintenanceForm] = useState({ preferredPeriod: "", message: "" });
+  const selectedOrder = currentCustomerOrders.find((order) => order.id === selectedOrderId);
+  const documentsForOrder = (orderId) => customerDocuments.filter((document) => document.orderId === orderId);
+  const sortedOrders = useMemo(() => [...currentCustomerOrders].sort((left, right) => `${left.date || "9999"} ${left.time || ""}`.localeCompare(`${right.date || "9999"} ${right.time || ""}`)), [currentCustomerOrders]);
+  const messages = currentCustomerOrders.flatMap((order) => getCustomerPortalState(order).messages.map((message) => ({ ...message, orderId: order.id })));
+  const issues = currentCustomerOrders.flatMap((order) => getCustomerPortalState(order).issues.map((issue) => ({ ...issue, orderId: order.id })));
 
   useEffect(() => {
-    const firstOrder = nextOrder || sortedOrders[0];
-    if (!firstOrder) return;
-    if (initialSection === "customerCare") setOpenCareOrderId(firstOrder.id);
-    if (initialSection === "customerContact") setQuestionOrderId(firstOrder.id);
-  }, [initialSection, nextOrder?.id, sortedOrders[0]?.id]);
+    setSelectedOrderId("");
+  }, [initialSection]);
 
-  const prepareQuestion = (order) => {
-    const question = questionText.trim();
-    if (!question) return;
-    setPreparedQuestion([
-      "Guten Tag,",
-      "",
-      `ich habe eine Rückfrage zu meinem Auftrag ${order.id} (${productName(order.product)}).`,
-      `Termin: ${order.date || "noch offen"}${order.time ? ` um ${order.time} Uhr` : ""}`,
-      `Meine Rückfrage: ${question}`,
-      "",
-      "Bitte melden Sie sich bei mir. Vielen Dank.",
-    ].join("\n"));
+  const openMaintenance = (order) => {
+    setMaintenanceOrder(order);
+    setMaintenanceForm({ preferredPeriod: "", message: "" });
+  };
+  const submitMaintenance = () => {
+    if (!maintenanceOrder || !maintenanceForm.preferredPeriod.trim()) return;
+    saveMaintenanceRequest({ orderId: maintenanceOrder.id, product: maintenanceOrder.product, ...maintenanceForm });
+    setMaintenanceOrder(null);
   };
 
-  return (
-    <div className="space-y-5">
-      <Card>
-        <SectionTitle
-          icon={BriefcaseBusiness}
-          title={sectionHeading[0]}
-          subtitle={sectionHeading[1]}
-        />
-        <div className="grid gap-3 sm:grid-cols-3">
-          <div className="rounded-3xl bg-slate-50 p-4">
-            <p className="text-3xl font-black">{currentCustomerOrders.length}</p>
-            <p className="text-sm text-slate-600">Aufträge</p>
-          </div>
-          <div className="rounded-3xl bg-emerald-50 p-4">
-            <p className="text-3xl font-black text-emerald-900">{confirmedCount}</p>
-            <p className="text-sm text-emerald-800">Termine bestätigt</p>
-          </div>
-          <div className="rounded-3xl bg-sky-50 p-4">
-            <p className="text-3xl font-black text-sky-900">{customerDocuments.length}</p>
-            <p className="text-sm text-sky-800">Dokumente</p>
-          </div>
-        </div>
-        {nextOrder && (
-          <button
-            type="button"
-            onClick={() => openCustomerOrder(nextOrder)}
-            className="mt-4 flex w-full items-center justify-between gap-4 rounded-3xl bg-slate-950 p-4 text-left text-white"
-          >
-            <span>
-              <span className="block text-xs font-bold uppercase text-white/60">Nächster Termin</span>
-              <span className="mt-1 block font-black">{nextOrder.date || "Termin offen"} {nextOrder.time || ""} · {productName(nextOrder.product)}</span>
-            </span>
-            <CalendarDays className="shrink-0" />
-          </button>
-        )}
-      </Card>
+  return <div className="space-y-4">
+    {(offline || pendingSyncCount > 0) && <div role="status" className="rounded-2xl bg-amber-50 p-3 text-sm font-bold text-amber-950">{offline ? "Offline verfügbar. Ihre Änderung wird synchronisiert, sobald wieder Internet verfügbar ist." : `${pendingSyncCount} Änderung${pendingSyncCount === 1 ? "" : "en"} wird noch sicher übertragen.`}</div>}
 
-      <div className="space-y-4">
-        {sortedOrders.map((order) => {
-          const documents = customerDocuments.filter((document) => document.orderId === order.id);
-          const careTips = allMaintenanceTips.filter((tip) => tip.productIds?.includes(order.product));
-          const careOpen = openCareOrderId === order.id;
-          const questionOpen = questionOrderId === order.id;
+    {initialSection === "portal" && selectedOrder && <CustomerOrderDetails company={company} documents={documentsForOrder(selectedOrder.id)} onAcknowledgeDocument={confirmCustomerDocument} onApproval={confirmCustomerApproval} onBack={() => setSelectedOrderId("")} onConfirmAppointment={confirmCustomerAppointment} onIssue={saveCustomerIssue} onMessage={saveCustomerMessage} onRequestAppointment={requestAppointmentChange} order={selectedOrder} showNotice={showNotice} />}
 
-          return (
-            <Card key={order.id}>
-              <button type="button" onClick={() => openCustomerOrder(order)} className="w-full text-left">
-                <div className="flex flex-wrap items-start justify-between gap-3">
-                  <div>
-                    <p className="text-xs font-bold uppercase tracking-wide text-slate-500">Auftrag {order.id}</p>
-                    <h2 className="mt-1 text-xl font-black">{productName(order.product)}</h2>
-                  </div>
-                  <Badge>{order.customerConfirmed ? "Termin bestätigt" : order.status || "offen"}</Badge>
-                </div>
-              </button>
+    {initialSection === "portal" && !selectedOrder && <><Card><SectionTitle icon={BriefcaseBusiness} title="Meine Aufträge" subtitle="Nur Ihre eigenen Termine, Aufträge und freigegebenen Informationen." /><div className="grid grid-cols-2 gap-3 sm:grid-cols-4"><div className="rounded-2xl bg-slate-50 p-3"><p className="text-2xl font-black">{currentCustomerOrders.filter((order) => !["Erledigt", "Archiviert"].includes(order.status)).length}</p><p className="text-xs font-bold text-slate-500">offen</p></div><div className="rounded-2xl bg-sky-50 p-3"><p className="text-2xl font-black text-sky-950">{currentCustomerOrders.filter((order) => order.date).length}</p><p className="text-xs font-bold text-sky-800">geplant</p></div><div className="rounded-2xl bg-amber-50 p-3"><p className="text-2xl font-black text-amber-950">{currentCustomerOrders.filter((order) => order.status === "In Arbeit").length}</p><p className="text-xs font-bold text-amber-800">in Arbeit</p></div><div className="rounded-2xl bg-emerald-50 p-3"><p className="text-2xl font-black text-emerald-950">{currentCustomerOrders.filter((order) => ["Erledigt", "Archiviert"].includes(order.status)).length}</p><p className="text-xs font-bold text-emerald-800">erledigt</p></div></div></Card><div className="grid gap-3 lg:grid-cols-2">{sortedOrders.map((order) => <CustomerOrderCard key={order.id} documentCount={documentsForOrder(order.id).length} onOpen={(item) => setSelectedOrderId(item.id)} order={order} />)}</div>{!sortedOrders.length && <Card><p className="rounded-3xl bg-slate-50 p-5 text-sm font-bold text-slate-600">Aktuell keine offenen oder abgeschlossenen Aufträge für Ihr Kundenkonto.</p></Card>}</>}
 
-              <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-                <div className="rounded-2xl bg-slate-50 p-3">
-                  <p className="flex items-center gap-2 text-xs font-bold uppercase text-slate-500"><CalendarDays size={15} />Termin</p>
-                  <p className="mt-2 text-sm font-black">{order.date || "noch offen"} {order.time || ""}</p>
-                </div>
-                <div className="rounded-2xl bg-slate-50 p-3">
-                  <p className="flex items-center gap-2 text-xs font-bold uppercase text-slate-500"><UserRound size={15} />Ansprechpartner</p>
-                  <p className="mt-2 text-sm font-black">{contactPerson(order)}</p>
-                </div>
-                <div className="rounded-2xl bg-slate-50 p-3 sm:col-span-2">
-                  <p className="flex items-center gap-2 text-xs font-bold uppercase text-slate-500"><MapPin size={15} />Adresse</p>
-                  <p className="mt-2 text-sm font-black">{order.address || "noch nicht hinterlegt"}</p>
-                </div>
-              </div>
+    {initialSection === "customerDocuments" && <Card><SectionTitle icon={BriefcaseBusiness} title="Dokumente" subtitle="Nur vom Betrieb ausdrücklich für Sie freigegebene Dokumente." /><CustomerDocuments documents={customerDocuments} onAcknowledge={confirmCustomerDocument} /></Card>}
 
-              {order.customerConfirmed && (
-                <div role="status" className="mt-4 flex items-start gap-3 rounded-2xl bg-emerald-50 p-4 text-sm text-emerald-900">
-                  <CheckCircle2 className="mt-0.5 shrink-0" size={19} />
-                  <div>
-                    <p className="font-black">Termin erfolgreich bestätigt</p>
-                    <p className="mt-1">Ihre Bestätigung ist lokal gespeichert{order.customerConfirmedAt ? ` · ${order.customerConfirmedAt}` : ""}.</p>
-                  </div>
-                </div>
-              )}
+    {initialSection === "customerCare" && <Card><SectionTitle icon={RefreshCw} title="Pflege & Wartung" subtitle="Praxisnahe Hinweise passend zu Ihren Produkten. Herstellerangaben bleiben maßgeblich." /><CustomerCareTips onMaintenanceRequest={openMaintenance} orders={currentCustomerOrders} /></Card>}
 
-              <div className="mt-4 grid gap-2 sm:grid-cols-3">
-                <button
-                  type="button"
-                  disabled={order.customerConfirmed}
-                  onClick={() => confirmCustomerAppointment(order)}
-                  className={`rounded-2xl px-4 py-3 text-sm font-black ${order.customerConfirmed ? "cursor-default bg-emerald-100 text-emerald-800" : "bg-slate-950 text-white"}`}
-                >
-                  {order.customerConfirmed ? "Termin bestätigt" : "Termin bestätigen"}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setQuestionOrderId(questionOpen ? "" : order.id);
-                    setQuestionText("");
-                    setPreparedQuestion("");
-                  }}
-                  className="rounded-2xl bg-sky-100 px-4 py-3 text-sm font-black text-sky-900"
-                >
-                  Rückfrage vorbereiten
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setOpenCareOrderId(careOpen ? "" : order.id)}
-                  className="flex items-center justify-center gap-2 rounded-2xl bg-emerald-100 px-4 py-3 text-sm font-black text-emerald-900"
-                >
-                  Pflegehinweise öffnen <ChevronDown size={17} className={careOpen ? "rotate-180" : ""} />
-                </button>
-              </div>
+    {initialSection === "customerContact" && <><Card><SectionTitle icon={MessageSquareText} title="Kontakt & Rückfragen" subtitle="Fragen und Meldungen werden Ihrem Auftrag zugeordnet – ohne automatische Nachricht oder Terminbuchung." /><div className="grid gap-3 sm:grid-cols-2">{company?.contactPhone && <a href={`tel:${company.contactPhone}`} className="flex min-h-12 items-center justify-center gap-2 rounded-2xl bg-slate-950 px-4 text-sm font-black text-white"><Phone size={18} />Anrufen</a>}{company?.contactEmail && <a href={`mailto:${company.contactEmail}`} className="flex min-h-12 items-center justify-center gap-2 rounded-2xl bg-sky-100 px-4 text-sm font-black text-sky-950"><Mail size={18} />E-Mail</a>}</div>{!company?.contactPhone && !company?.contactEmail && <p className="rounded-2xl bg-slate-50 p-4 text-sm font-bold text-slate-600">Kontaktdaten sind noch nicht hinterlegt. Sie können unten eine Rückfrage speichern.</p>}</Card><CustomerMessageForm onSubmit={saveCustomerMessage} orders={currentCustomerOrders} /><CustomerIssueForm onSubmit={saveCustomerIssue} orders={currentCustomerOrders} showNotice={showNotice} />{messages.length > 0 && <Card><h2 className="font-black">Meine Rückfragen</h2><div className="mt-3 space-y-2">{messages.map((message) => <article key={message.id} className="rounded-2xl bg-slate-50 p-3 text-sm"><div className="flex justify-between gap-2"><strong>{message.topic} · {message.orderId}</strong><span className="text-xs font-bold text-slate-500">{message.status}</span></div><p className="mt-2">{message.message}</p>{message.reply && <p className="mt-2 rounded-xl bg-emerald-50 p-3 font-bold text-emerald-950">Antwort: {message.reply}</p>}</article>)}</div></Card>}{issues.length > 0 && <Card><h2 className="font-black">Meine Meldungen</h2><div className="mt-3 space-y-2">{issues.map((issue) => <article key={issue.id} className="rounded-2xl bg-amber-50 p-3 text-sm"><div className="flex justify-between gap-2"><strong>{issue.category} · {issue.orderId}</strong><span className="text-xs font-bold">{issue.status}</span></div>{issue.reworkOrderId && <p className="mt-2 font-bold">Nacharbeit {issue.reworkOrderId} wurde vorbereitet.</p>}</article>)}</div></Card>}</>}
 
-              {questionOpen && (
-                <div className="mt-4 rounded-3xl bg-sky-50 p-4">
-                  <p className="flex items-center gap-2 font-black text-sky-950"><CircleHelp size={18} />Rückfrage als Text vorbereiten</p>
-                  <p className="mt-1 text-xs text-sky-800">Es wird nichts automatisch versendet.</p>
-                  <textarea
-                    value={questionText}
-                    onChange={(event) => setQuestionText(event.target.value)}
-                    placeholder="Was möchten Sie zum Termin oder Auftrag fragen?"
-                    className="mt-3 h-28 w-full resize-none rounded-2xl border border-sky-200 bg-white p-3 text-sm outline-none focus:border-sky-500"
-                  />
-                  <button
-                    type="button"
-                    disabled={!questionText.trim()}
-                    onClick={() => prepareQuestion(order)}
-                    className="mt-2 rounded-2xl bg-sky-900 px-4 py-3 text-sm font-black text-white disabled:cursor-not-allowed disabled:opacity-40"
-                  >
-                    Textentwurf erstellen
-                  </button>
-                  {preparedQuestion && <div className="mt-3"><CopyBox title="Rückfrage kopieren" text={preparedQuestion} /></div>}
-                </div>
-              )}
-
-              {careOpen && (
-                <div className="mt-4 rounded-3xl bg-emerald-50 p-4">
-                  <p className="flex items-center gap-2 font-black text-emerald-950"><RefreshCw size={18} />Pflegehinweise für dieses Produkt</p>
-                  <div className="mt-3 space-y-3">
-                    {careTips.map((tip) => (
-                      <article key={tip.id} className="rounded-2xl bg-white p-4">
-                        <h3 className="font-black">{tip.title}</h3>
-                        <p className="mt-1 text-sm text-slate-600">{tip.note}</p>
-                        <ul className="mt-3 space-y-1 text-sm text-slate-700">
-                          {tip.steps.map((step) => <li key={step}>• {step}</li>)}
-                        </ul>
-                      </article>
-                    ))}
-                    {careTips.length === 0 && <p className="text-sm font-bold text-emerald-900">Für dieses Produkt sind noch keine Pflegehinweise hinterlegt.</p>}
-                  </div>
-                </div>
-              )}
-
-              <div className="mt-4 rounded-3xl border border-slate-200 p-4">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <p className="flex items-center gap-2 font-black"><FileText size={18} />Dokumente & PDFs</p>
-                  <Badge>{documents.length ? `${documents.length} bereitgestellt` : "noch keine"}</Badge>
-                </div>
-                <div className="mt-3 grid gap-2 sm:grid-cols-2">
-                  {documents.map((document) => (
-                    <div key={document.id} className="rounded-2xl bg-slate-50 p-3">
-                      <p className="truncate text-sm font-black">{document.fileName || document.template || "Dokument"}</p>
-                      <p className="mt-1 text-xs font-bold text-slate-500">Status: {documentLabel(document)}</p>
-                    </div>
-                  ))}
-                  {documents.length === 0 && <p className="text-sm text-slate-600">Sobald ein Dokument freigegeben wurde, erscheint sein Status hier.</p>}
-                </div>
-              </div>
-            </Card>
-          );
-        })}
-
-        {sortedOrders.length === 0 && (
-          <Card>
-            <div className="rounded-3xl bg-slate-50 p-5 text-sm font-bold text-slate-600">
-              Ihrem Kundenkonto ist noch kein Auftrag zugeordnet. Es werden keine fremden Aufträge angezeigt.
-            </div>
-          </Card>
-        )}
-      </div>
-    </div>
-  );
+    {maintenanceOrder && <div className="fixed inset-0 z-50 flex items-end justify-center bg-slate-950/55 p-2 sm:items-center" role="dialog" aria-modal="true"><div className="w-full max-w-lg rounded-[2rem] bg-white p-5"><h2 className="text-xl font-black">Wartung anfragen</h2><p className="mt-1 text-sm text-slate-600">Es wird nur eine Anfrage erstellt. Ein Termin wird nicht automatisch gebucht.</p><label className="mt-4 block text-sm font-bold">Gewünschter Zeitraum<input value={maintenanceForm.preferredPeriod} onChange={(event) => setMaintenanceForm({ ...maintenanceForm, preferredPeriod: event.target.value })} placeholder="z. B. Oktober oder vormittags" className="mt-1 min-h-12 w-full rounded-xl border border-slate-200 px-3" /></label><label className="mt-3 block text-sm font-bold">Nachricht<textarea value={maintenanceForm.message} onChange={(event) => setMaintenanceForm({ ...maintenanceForm, message: event.target.value })} className="mt-1 h-24 w-full resize-none rounded-xl border border-slate-200 p-3" /></label><div className="mt-4 grid grid-cols-2 gap-2"><button type="button" onClick={() => setMaintenanceOrder(null)} className="min-h-12 rounded-xl bg-slate-100 font-black">Abbrechen</button><button type="button" disabled={!maintenanceForm.preferredPeriod.trim()} onClick={submitMaintenance} className="min-h-12 rounded-xl bg-slate-950 font-black text-white disabled:opacity-40">Anfrage speichern</button></div></div></div>}
+  </div>;
 }

@@ -13,7 +13,8 @@
     "preview": "vite preview --host 0.0.0.0",
     "test:diagnosis": "node scripts/verify-diagnosis.mjs",
     "test:learning": "node scripts/verify-learning.mjs",
-    "test:planning": "node scripts/verify-planning.mjs"
+    "test:planning": "node scripts/verify-planning.mjs",
+    "test:customer": "node scripts/verify-customer-portal.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "2.45.4",

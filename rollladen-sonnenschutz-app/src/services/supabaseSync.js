@@ -81,6 +81,29 @@ export async function saveAssignedOrderChanges({ client, companyId, orders, time
   })(), timeoutMs);
 }
 
+export async function saveCustomerPortalChanges({ client, companyId, items, timeoutMs = 15000 }) {
+  if (!client) throw new Error("Supabase ist nicht konfiguriert.");
+  return withTimeout((async () => {
+    const { data: authData, error: authError } = await client.auth.getUser();
+    if (authError) throw authError;
+    if (!authData?.user) throw new Error("Keine gültige Cloud-Sitzung gefunden.");
+
+    for (const item of items) {
+      const action = item?.data?.portalAction || item?.data;
+      if (!action?.id || !action?.orderId || !action?.type) throw new Error("Kundenänderung ist unvollständig.");
+      const { error } = await client.rpc("save_customer_portal_action", {
+        p_company_id: companyId,
+        p_action_id: action.id,
+        p_order_id: action.orderId,
+        p_action_type: action.type,
+        p_payload: action.payload || {},
+      });
+      if (error) throw error;
+    }
+    return { user: authData.user };
+  })(), timeoutMs);
+}
+
 export async function saveLearningRecord({ client, learningRow, timeoutMs = 15000 }) {
   if (!client) throw new Error("Supabase ist nicht konfiguriert.");
   return withTimeout((async () => {
